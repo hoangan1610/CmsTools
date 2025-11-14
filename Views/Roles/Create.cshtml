@@ -1,0 +1,34 @@
+﻿@model CmsTools.Models.CmsRoleEditViewModel
+
+@{
+    ViewData["Title"] = "Tạo role";
+}
+
+<h2 class="mt-3 mb-3">Tạo role mới</h2>
+
+<form asp-action="Create" asp-controller="Roles" method="post">
+    @Html.AntiForgeryToken()
+
+    <div class="mb-3">
+        <label asp-for="Name" class="form-label">Tên role</label>
+        <input asp-for="Name" class="form-control" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Description" class="form-label">Mô tả</label>
+        <textarea asp-for="Description" class="form-control" rows="2"></textarea>
+    </div>
+
+    <div class="form-check mb-3">
+        <input asp-for="IsActive" class="form-check-input" />
+        <label asp-for="IsActive" class="form-check-label">Active</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+    <a class="btn btn-secondary ms-2" href="@Url.Action("Index", "Roles")">Quay lại</a>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

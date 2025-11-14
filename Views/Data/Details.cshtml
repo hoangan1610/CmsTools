@@ -1,0 +1,116 @@
+﻿@model CmsTools.Models.DataEditViewModel
+@using System.Globalization
+@using CmsTools.Models
+
+@functions {
+    string RenderCell(CmsTools.Models.CmsColumnMeta col, object? value)
+    {
+        if (value == null || value is DBNull) return string.Empty;
+
+        var s = value.ToString() ?? string.Empty;
+        var fmt = (col.Format ?? string.Empty).Trim();
+
+        if (string.IsNullOrEmpty(fmt))
+            return s;
+
+        var lower = fmt.ToLowerInvariant();
+
+        try
+        {
+            if (value is DateTime dt)
+            {
+                if (lower == "datetime")
+                    return dt.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture);
+
+                if (lower == "date")
+                    return dt.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture);
+
+                if (lower == "time")
+                    return dt.ToString("HH:mm", CultureInfo.CurrentCulture);
+            }
+
+            if (value is IFormattable f)
+            {
+                return f.ToString(fmt, CultureInfo.CurrentCulture) ?? s;
+            }
+
+            return s;
+        }
+        catch
+        {
+            return s;
+        }
+    }
+}
+
+@{
+    var title = "Chi tiết - " + (Model.Table.DisplayName ?? Model.Table.TableName);
+    ViewData["Title"] = title;
+}
+
+<h2 class="mt-3 mb-3">@title</h2>
+
+<div class="card">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Bảng</dt>
+            <dd class="col-sm-9">
+                <code>@Model.Table.FullName</code>
+            </dd>
+
+            <dt class="col-sm-3">ID (@Model.PrimaryKeyColumn)</dt>
+            <dd class="col-sm-9">
+                @Model.PrimaryKeyValue
+            </dd>
+
+            <hr />
+
+            @foreach (var col in Model.Columns)
+            {
+                var label = col.DisplayName ?? col.ColumnName;
+                Model.Values.TryGetValue(col.ColumnName, out var value);
+
+                var isImageCol =
+                (!string.IsNullOrEmpty(col.Format) &&
+                col.Format.Equals("image", System.StringComparison.OrdinalIgnoreCase))
+                || col.ColumnName.IndexOf("image", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || col.ColumnName.IndexOf("img", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || col.ColumnName.IndexOf("photo", System.StringComparison.OrdinalIgnoreCase) >= 0
+                || col.ColumnName.IndexOf("avatar", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+                <dt class="col-sm-3">@label</dt>
+                <dd class="col-sm-9">
+                    @if (isImageCol)
+                    {
+                        var url = value?.ToString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(url))
+                        {
+                            <a href="@url" target="_blank" rel="noopener noreferrer">
+                                <img src="@url"
+                                     alt="img"
+                                     style="max-height:200px;max-width:100%;object-fit:contain;" />
+                            </a>
+                        }
+                    }
+                    else
+                    {
+                        @RenderCell(col, value)
+                    }
+                </dd>
+            }
+
+        </dl>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a class="btn btn-secondary me-2"
+       href="@Url.Action("List", "Data", new { tableId = Model.Table.Id })">
+        Quay lại danh sách
+    </a>
+
+    <a class="btn btn-primary"
+       href="@Url.Action("Edit", "Data", new { tableId = Model.Table.Id, id = Model.PrimaryKeyValue })">
+        Sửa bản ghi
+    </a>
+</div>

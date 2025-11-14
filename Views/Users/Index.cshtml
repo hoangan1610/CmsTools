@@ -1,0 +1,72 @@
+﻿@model IEnumerable<CmsTools.Models.CmsUserListItem>
+
+@{
+    ViewData["Title"] = "Users";
+}
+
+<h2 class="mt-3 mb-3">Users</h2>
+
+@if (TempData["UsersMessage"] is string msg && !string.IsNullOrWhiteSpace(msg))
+{
+    <div class="alert alert-info">@msg</div>
+}
+
+<p class="mt-3 mb-3">
+    <a class="btn btn-success" href="@Url.Action("Create", "Users")">
+        Tạo user mới
+    </a>
+</p>
+
+@if (Model == null || !Model.Any())
+{
+    <p class="text-muted">Chưa có user nào trong <code>tbl_cms_user</code>.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:70px;">ID</th>
+                    <th>Username</th>
+                    <th>Họ tên</th>
+                    <th style="width:100px;">Trạng thái</th>
+                    <th>Roles</th>
+                    <th style="width:180px;">Thao tác</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var u in Model)
+                {
+                    <tr>
+                        <td>@u.Id</td>
+                        <td>@u.Username</td>
+                        <td>@(u.FullName ?? "")</td>
+                        <td>
+                            @if (u.IsActive)
+                            {
+                                <span class="badge bg-success">Active</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Inactive</span>
+                            }
+                        </td>
+                        <td>@(string.IsNullOrWhiteSpace(u.Roles) ? "(none)" : u.Roles)</td>
+                        <td>
+                            <a class="btn btn-sm btn-outline-primary me-1"
+                               href="@Url.Action("Edit", "Users", new { id = u.Id })">
+                                Sửa
+                            </a>
+
+                            <a class="btn btn-sm btn-outline-warning"
+                               href="@Url.Action("ChangePassword", "Users", new { id = u.Id })">
+                                Đổi mật khẩu
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

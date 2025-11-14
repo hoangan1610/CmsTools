@@ -1,0 +1,57 @@
+﻿@model CmsTools.Models.CmsConnectionEditModel
+
+@{
+    ViewData["Title"] = Model.Id == null
+        ? "Thêm connection"
+        : $"Sửa connection #{Model.Id}";
+}
+
+<h2 class="mt-3 mb-3">@ViewData["Title"]</h2>
+
+<form asp-controller="Connections" asp-action="Edit" method="post">
+    @Html.AntiForgeryToken()
+
+    @if (Model.Id != null && Model.Id > 0)
+    {
+        <input type="hidden" asp-for="Id" />
+    }
+
+    <div class="mb-3">
+        <label asp-for="Name" class="form-label">Tên connection</label>
+        <input asp-for="Name" class="form-control" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Provider" class="form-label">Provider</label>
+        <select asp-for="Provider" class="form-select">
+            <option value="mssql">mssql</option>
+            <option value="mysql">mysql</option>
+            <option value="pgsql">pgsql</option>
+        </select>
+        <span class="form-text">
+            Hiện tại code mới hỗ trợ mssql (SqlConnection); các loại khác sẽ bổ sung sau.
+        </span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="ConnString" class="form-label">Connection string</label>
+        <textarea asp-for="ConnString" class="form-control" rows="3"></textarea>
+        <span asp-validation-for="ConnString" class="text-danger"></span>
+    </div>
+
+    <div class="form-check mb-3">
+        <input asp-for="IsActive" class="form-check-input" />
+        <label asp-for="IsActive" class="form-check-label">Kích hoạt</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+    <a asp-controller="Connections" asp-action="Index"
+       class="btn btn-secondary ms-2">
+        Quay lại
+    </a>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -1,0 +1,156 @@
+﻿@model CmsTools.Models.DataCreateViewModel
+@using System.Globalization
+@using CmsTools.Models
+
+@functions {
+    bool IsTextArea(CmsColumnMeta col)
+    {
+        var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
+        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+        if (name.Contains("description") ||
+            name.Contains("mo_ta") ||
+            name.Contains("content") ||
+            name.Contains("noi_dung") ||
+            name.Contains("note") ||
+            name.Contains("ghi_chu"))
+            return true;
+
+        if (dataType.Contains("text"))
+            return true;
+
+        if ((dataType.StartsWith("nvarchar") || dataType.StartsWith("varchar")) &&
+            dataType.Contains("(max)"))
+            return true;
+
+        return false;
+    }
+
+    string InputTypeFor(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+        if (t.StartsWith("bigint") ||
+            t.StartsWith("int") ||
+            t.StartsWith("smallint") ||
+            t.StartsWith("tinyint") ||
+            t.StartsWith("decimal") ||
+            t.StartsWith("numeric"))
+            return "number";
+
+        if (t.StartsWith("datetime") || t.StartsWith("date"))
+            return "text"; // dễ nhập dd/MM/yyyy
+
+        return "text";
+    }
+
+    string? StepFor(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
+        if (t.StartsWith("decimal") || t.StartsWith("numeric"))
+            return "0.01";
+
+        if (t.StartsWith("tinyint") || t.StartsWith("smallint") ||
+            t.StartsWith("int") || t.StartsWith("bigint"))
+            return "1";
+
+        return null;
+    }
+}
+
+@{
+    var title = "Thêm bản ghi - " + (Model.Table.DisplayName ?? Model.Table.TableName);
+    ViewData["Title"] = title;
+}
+
+<h2 class="mt-3 mb-3">@title</h2>
+
+<form asp-action="Create"
+      asp-controller="Data"
+      asp-route-tableId="@Model.Table.Id"
+      method="post">
+
+    @Html.AntiForgeryToken()
+
+    @* PK readonly *@
+    @{
+        var pk = Model.Columns.FirstOrDefault(c => c.IsPrimary);
+        if (pk != null)
+        {
+            <div class="mb-3">
+                <label class="form-label">
+                    @((pk.DisplayName ?? pk.ColumnName) + " (PK)")
+                </label>
+                <input class="form-control" value="(auto)" readonly />
+            </div>
+        }
+    }
+
+    @foreach (var col in Model.Columns)
+    {
+        if (col.IsPrimary)
+            continue;
+
+        var label = col.DisplayName ?? col.ColumnName;
+        var name = col.ColumnName;
+
+        if (!col.IsEditable)
+        {
+            <div class="mb-3">
+                <label class="form-label">@label (readonly)</label>
+                <input class="form-control"
+                       value="(auto / default)"
+                       readonly />
+                @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                {
+                    <div class="form-text">
+                        default_expr: <code>@col.DefaultExpr</code>
+                    </div>
+                }
+            </div>
+
+            continue;
+        }
+
+        <div class="mb-3">
+            <label class="form-label">@label</label>
+
+            @if (IsTextArea(col))
+            {
+                <textarea name="@name"
+                  class="form-control"
+                  rows="3"></textarea>
+            }
+            else
+            {
+                var inputType = InputTypeFor(col);
+                var step = StepFor(col);
+
+                <input name="@name"
+                       class="form-control"
+                       type="@inputType"
+                       @(step != null ? $"step=\"{step}\"" : "") />
+            }
+
+            <div class="form-text">
+                <small>
+                    Kiểu: <code>@col.DataType</code>
+                    @if (!string.IsNullOrWhiteSpace(col.Format))
+                    {
+                        @: | Format: <code>@col.Format</code>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                    {
+                        @: | default_expr: <code>@col.DefaultExpr</code>
+                    }
+                </small>
+            </div>
+        </div>
+    }
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+    <a class="btn btn-secondary ms-2"
+       href="@Url.Action("List", "Data", new { tableId = Model.Table.Id })">
+        Quay lại
+    </a>
+</form>

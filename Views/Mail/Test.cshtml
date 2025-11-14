@@ -1,0 +1,45 @@
+﻿@{
+    ViewData["Title"] = "Gửi email test";
+    var defaultTo = ViewBag.DefaultTo as string ?? "";
+    var msg = ViewBag.Message as string;
+}
+
+<h2 class="mt-3 mb-3">Gửi email test</h2>
+
+@if (!string.IsNullOrWhiteSpace(msg))
+{
+    <div class="alert alert-info">@msg</div>
+}
+
+<form asp-action="Test" asp-controller="Mail" method="post">
+    @Html.AntiForgeryToken()
+
+    <div class="mb-3">
+        <label class="form-label">To</label>
+        <input type="email"
+               name="to"
+               class="form-control"
+               value="@defaultTo"
+               placeholder="Email người nhận" />
+        <div class="form-text">
+            Nếu để trống sẽ dùng <code>@defaultTo</code>.
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Subject</label>
+        <input type="text"
+               name="subject"
+               class="form-control"
+               value="[CMS_Tools] Test email" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Body</label>
+        <textarea name="body" class="form-control" rows="5">
+Đây là email test gửi từ CMS_Tools.
+        </textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Gửi</button>
+</form>

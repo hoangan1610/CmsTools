@@ -1,0 +1,27 @@
+﻿@{
+    ViewData["Title"] = "Không có quyền truy cập";
+    var returnUrl = ViewData["ReturnUrl"] as string;
+}
+
+<h2 class="mt-3 mb-3 text-danger">Không có quyền truy cập</h2>
+
+<p class="text-muted">
+    Bạn không có quyền truy cập vào chức năng hoặc đường dẫn này.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(returnUrl))
+{
+    <p>
+        <strong>Đường dẫn:</strong>
+        <code>@returnUrl</code>
+    </p>
+}
+
+<p class="mt-3">
+    <a class="btn btn-primary" href="@Url.Action("Index", "Schema")">
+        Về trang Schema
+    </a>
+    <a class="btn btn-secondary ms-2" href="@Url.Action("Login", "Account")">
+        Đăng nhập lại
+    </a>
+</p>

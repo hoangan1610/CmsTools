@@ -1,0 +1,112 @@
+﻿@model CmsTools.Models.SchemaColumnsViewModel
+
+@{
+    var title = "Cấu hình cột - " + (Model.Table.DisplayName ?? Model.Table.TableName);
+    ViewData["Title"] = title;
+}
+
+<h2 class="mt-3 mb-3">@title</h2>
+
+@if (TempData["SchemaMessage"] is string msg && !string.IsNullOrWhiteSpace(msg))
+{
+    <div class="alert alert-success">@msg</div>
+}
+
+<div class="mb-2">
+    <span class="text-muted">
+        Bảng thật: <code>@Model.Table.SchemaName.@Model.Table.TableName</code>
+        (ID: @Model.Table.Id)
+    </span>
+</div>
+
+<form asp-action="Columns" asp-controller="Schema" method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="tableId" value="@Model.Table.Id" />
+
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:50px;">ID</th>
+                    <th>Tên cột</th>
+                    <th>Kiểu</th>
+                    <th>Tên hiển thị</th>
+                    <th class="text-center">List</th>
+                    <th class="text-center">Editable</th>
+                    <th class="text-center">Filter</th>
+                    <th style="width:80px;">Width</th>
+                    <th>Format</th>
+                    <th>Default Expr</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in Model.Columns)
+                {
+                    var idStr = c.Id.ToString();
+                    <tr>
+                        <td>@c.Id</td>
+                        <td>
+                            <code>@c.ColumnName</code>
+                            @if (c.IsPrimary)
+                            {
+                                <span class="badge bg-secondary ms-1">PK</span>
+                            }
+                        </td>
+                        <td>@c.DataType</td>
+                        <td>
+                            <input type="text"
+                                   name="display_name_@idStr"
+                                   class="form-control form-control-sm"
+                                   value="@(c.DisplayName ?? "")" />
+                        </td>
+                        <td class="text-center">
+                            <input type="checkbox"
+                                   name="is_list_@idStr"
+                                   class="form-check-input"
+                                   @(c.IsList ? "checked" : "") />
+                        </td>
+                        <td class="text-center">
+                            <input type="checkbox"
+                                   name="is_editable_@idStr"
+                                   class="form-check-input"
+                                   @(c.IsEditable ? "checked" : "") />
+                        </td>
+                        <td class="text-center">
+                            <input type="checkbox"
+                                   name="is_filter_@idStr"
+                                   class="form-check-input"
+                                   @(c.IsFilter ? "checked" : "") />
+                        </td>
+                        <td>
+                            <input type="number"
+                                   name="width_@idStr"
+                                   class="form-control form-control-sm"
+                                   value="@(c.Width?.ToString() ?? "")" />
+                        </td>
+                        <td>
+                            <input type="text"
+                                   name="format_@idStr"
+                                   class="form-control form-control-sm"
+                                   value="@(c.Format ?? "")" />
+                        </td>
+                        <td>
+                            <input type="text"
+                                   name="default_expr_@idStr"
+                                   class="form-control form-control-sm"
+                                   value="@(c.DefaultExpr ?? "")"
+                                   placeholder="VD: NOW, CURRENT_USER_ID, CONST:1" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <button type="submit" class="btn btn-primary">
+        Lưu cấu hình
+    </button>
+    <a class="btn btn-secondary ms-2"
+       href="@Url.Action("Index", "Schema")">
+        Quay lại danh sách bảng
+    </a>
+</form>
