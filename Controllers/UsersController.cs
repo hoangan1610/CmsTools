@@ -33,8 +33,10 @@ namespace CmsTools.Controllers
 
         // ===================== INDEX =====================
 
+        // ===================== INDEX =====================
+
         [HttpGet]
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(int? roleId)
         {
             const string sql = @"
 SELECT 
@@ -57,13 +59,20 @@ SELECT
         ''
     )
 FROM dbo.tbl_cms_user u
+WHERE (@roleId IS NULL OR EXISTS (
+        SELECT 1
+        FROM dbo.tbl_cms_user_role ur
+        WHERE ur.user_id = u.id
+          AND ur.role_id = @roleId
+    ))
 ORDER BY u.username;";
 
             using var conn = OpenMeta();
-            var users = (await conn.QueryAsync<CmsUserListItem>(sql)).ToList();
+            var users = (await conn.QueryAsync<CmsUserListItem>(sql, new { roleId })).ToList();
 
-            return View(users); // Views/Users/Index.cshtml
+            return View(users); // Views/Users/Index.cshtml  -> @model IEnumerable<CmsUserListItem>
         }
+
 
         // ===================== EDIT (GET) =====================
 
@@ -401,5 +410,34 @@ WHERE id = @Id;";
 
             return RedirectToAction("Index");
         }
+
+        // ===================== TOGGLE ACTIVE (LOCK/UNLOCK) =====================
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ToggleActive(int id)
+        {
+            using var conn = OpenMeta();
+
+            var current = await conn.ExecuteScalarAsync<bool?>(
+                "SELECT is_active FROM dbo.tbl_cms_user WHERE id = @id;",
+                new { id });
+
+            if (!current.HasValue)
+                return NotFound("User không tồn tại.");
+
+            var newVal = !current.Value;
+
+            await conn.ExecuteAsync(
+                "UPDATE dbo.tbl_cms_user SET is_active = @v WHERE id = @id;",
+                new { v = newVal, id });
+
+            TempData["UsersMessage"] = newVal
+                ? "Đã mở khoá user."
+                : "Đã khoá user.";
+
+            return RedirectToAction("Index");
+        }
+
     }
 }

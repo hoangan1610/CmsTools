@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Data;
-using System.Security.Claims;
 using System.Threading.Tasks;
+using CmsTools.Models;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -36,23 +36,61 @@ namespace CmsTools.Controllers
             var userId = GetCurrentCmsUserId();
             if (userId == null)
             {
-                // chưa login -> cookie middleware sẽ tự redirect Login,
-                // nhưng để chắc chắn:
+                // chưa login -> về trang Login
                 return RedirectToAction("Login", "Account");
             }
 
             var isAdmin = User?.HasClaim("cms_is_admin", "1") ?? false;
-            if (isAdmin)
-            {
-                // Admin: vào trang cấu hình Schema
-                return RedirectToAction("Index", "Schema");
-            }
 
-            // Non-admin: tìm bảng đầu tiên user có can_view = 1
             await using var conn = new SqlConnection(_metaConn);
             await conn.OpenAsync();
 
-            const string sql = @"
+            // 1) Thống kê connection
+            const string sqlConnStats = @"
+SELECT 
+    TotalConnections  = COUNT(1),
+    ActiveConnections = SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END)
+FROM dbo.tbl_cms_connection;";
+
+            var connRow = await conn.QueryFirstAsync(sqlConnStats);
+            int totalConnections = (int)connRow.TotalConnections;
+            int activeConnections = connRow.ActiveConnections == null
+                ? 0
+                : (int)connRow.ActiveConnections;
+
+            // 2) Thống kê bảng
+            const string sqlTableStats = @"
+SELECT 
+    TotalTables   = COUNT(1),
+    EnabledTables = SUM(CASE WHEN is_enabled = 1 THEN 1 ELSE 0 END)
+FROM dbo.tbl_cms_table;";
+
+            var tblRow = await conn.QueryFirstAsync(sqlTableStats);
+            int totalTables = (int)tblRow.TotalTables;
+            int enabledTables = tblRow.EnabledTables == null
+                ? 0
+                : (int)tblRow.EnabledTables;
+
+            // 3) Số audit log 24h gần nhất (nếu chưa có bảng audit thì bạn có thể bỏ khối này)
+            int auditLast24h = 0;
+            try
+            {
+                const string sqlAudit = @"
+SELECT AuditLast24h = COUNT(1)
+FROM dbo.tbl_cms_audit_log
+WHERE created_at_utc >= DATEADD(day, -1, SYSUTCDATETIME());";
+
+                var auditRow = await conn.QueryFirstAsync(sqlAudit);
+                auditLast24h = (int)auditRow.AuditLast24h;
+            }
+            catch
+            {
+                // Nếu chưa tạo bảng audit_log thì cứ để 0, không crash
+                auditLast24h = 0;
+            }
+
+            // 4) Bảng đầu tiên user có can_view = 1
+            const string sqlFirstTable = @"
 SELECT TOP (1) tp.table_id
 FROM dbo.tbl_cms_table_permission tp
 JOIN dbo.tbl_cms_table t
@@ -64,18 +102,22 @@ WHERE ur.user_id = @uid
   AND tp.can_view = 1
 ORDER BY t.display_name, t.table_name;";
 
-            var tableId = await conn.ExecuteScalarAsync<int?>(
-                sql,
+            int? firstTableId = await conn.ExecuteScalarAsync<int?>(
+                sqlFirstTable,
                 new { uid = userId.Value });
 
-            if (tableId.HasValue && tableId.Value > 0)
+            var vm = new HomeDashboardViewModel
             {
-                // Nhảy sang Data/List cho bảng được phép xem
-                return RedirectToAction("List", "Data", new { tableId = tableId.Value });
-            }
+                IsAdmin = isAdmin,
+                TotalConnections = totalConnections,
+                ActiveConnections = activeConnections,
+                TotalTables = totalTables,
+                EnabledTables = enabledTables,
+                AuditLast24h = auditLast24h,
+                FirstTableIdForUser = firstTableId
+            };
 
-            // Không có quyền bảng nào -> hiện view thông báo
-            return View(); // Views/Home/Index.cshtml
+            return View(vm); // Views/Home/Index.cshtml (dashboard)
         }
     }
 }

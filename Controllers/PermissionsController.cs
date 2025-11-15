@@ -26,6 +26,7 @@ namespace CmsTools.Controllers
         private IDbConnection OpenMeta() => new SqlConnection(_metaConn);
 
         // ===== 1) INDEX: danh sách role + số user + số bảng có permission =====
+        // ===== 1) INDEX: danh sách role + số user + số bảng có permission =====
         [HttpGet]
         public async Task<IActionResult> Index()
         {
@@ -50,7 +51,7 @@ ORDER BY r.name;";
             using var conn = OpenMeta();
             var list = (await conn.QueryAsync<RoleListItem>(sql)).ToList();
 
-            return View(list); // Views/Permissions/Index.cshtml
+            return View(list); // Views/Permissions/Index.cshtml  -> @model IReadOnlyList<RoleListItem>
         }
 
         // ===== 2) EDIT (GET): sửa permission của 1 role =====
@@ -197,5 +198,65 @@ VALUES (
                 throw;
             }
         }
+
+        // ===== INDEX THEO BẢNG: filter + highlight bảng "mồ côi" =====
+        [HttpGet]
+        public async Task<IActionResult> Tables(int? connectionId, string? q)
+        {
+            using var conn = OpenMeta();
+
+            const string sqlConn = @"
+SELECT id, name, provider, conn_string AS ConnString, is_active
+FROM dbo.tbl_cms_connection
+ORDER BY name;";
+
+            var connections = (await conn.QueryAsync<CmsConnectionMeta>(sqlConn)).ToList();
+
+            const string sql = @"
+SELECT 
+    t.id              AS TableId,
+    c.name            AS ConnectionName,
+    t.schema_name     AS SchemaName,
+    t.table_name      AS TableName,
+    t.display_name    AS DisplayName,
+    HasViewRole = CASE 
+        WHEN EXISTS (
+            SELECT 1 
+            FROM dbo.tbl_cms_table_permission tp
+            WHERE tp.table_id = t.id
+              AND tp.can_view = 1
+        ) THEN CAST(1 AS bit)
+        ELSE CAST(0 AS bit)
+    END
+FROM dbo.tbl_cms_table t
+JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
+WHERE t.is_enabled = 1
+  AND c.is_active = 1
+  AND (@connId IS NULL OR t.connection_id = @connId)
+  AND (
+        @q IS NULL OR @q = '' OR
+        t.table_name LIKE '%' + @q + '%' OR
+        t.schema_name LIKE '%' + @q + '%' OR
+        t.display_name LIKE '%' + @q + '%' OR
+        c.name LIKE '%' + @q + '%'
+      )
+ORDER BY c.name, t.schema_name, t.table_name;";
+
+            var items = (await conn.QueryAsync<PermissionTableListItem>(
+                sql,
+                new { connId = connectionId, q }))
+                .ToList();
+
+            var vm = new PermissionTableIndexViewModel
+            {
+                Items = items,
+                Connections = connections,
+                ConnectionId = connectionId,
+                Search = q
+            };
+
+            return View(vm); // Views/Permissions/Tables.cshtml
+        }
+
     }
 }

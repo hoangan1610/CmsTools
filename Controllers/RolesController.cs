@@ -46,10 +46,12 @@ FROM dbo.tbl_cms_role r
 ORDER BY r.name;";
 
             using var conn = OpenMeta();
-            var rows = (await conn.QueryAsync<CmsRoleListItem>(sql)).ToList();
+            // 👇 đổi RoleListItem -> CmsRoleListItem
+            var list = (await conn.QueryAsync<CmsRoleListItem>(sql)).ToList();
 
-            return View(rows);   // Views/Roles/Index.cshtml
+            return View(list);   // Views/Roles/Index.cshtml
         }
+
 
         // ========== CREATE (GET) ==========
 

@@ -17,51 +17,66 @@
     </a>
 </p>
 
-@if (Model == null || !Model.Any())
-{
-    <p class="text-muted">Chưa có role nào.</p>
-}
-else
-{
-    <div class="table-responsive">
-        <table class="table table-sm table-bordered align-middle">
-            <thead class="table-light">
-                <tr>
-                    <th style="width:70px;">ID</th>
-                    <th style="width:180px;">Tên role</th>
-                    <th>Mô tả</th>
-                    <th style="width:100px;">Trạng thái</th>
-                    <th style="width:110px;">Số user</th>
-                    <th style="width:140px;">Thao tác</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var r in Model)
-                {
-                    <tr>
-                        <td>@r.Id</td>
-                        <td>@r.Name</td>
-                        <td>@(r.Description ?? "")</td>
-                        <td>
-                            @if (r.IsActive)
-                            {
-                                <span class="badge bg-success">Active</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Inactive</span>
-                            }
-                        </td>
-                        <td>@r.UserCount</td>
-                        <td>
-                            <a class="btn btn-sm btn-outline-primary"
-                               href="@Url.Action("Edit", "Roles", new { id = r.Id })">
-                                Sửa
-                            </a>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-}
+<table class="table table-sm table-bordered align-middle">
+    <thead class="table-light">
+        <tr>
+            <th style="width:70px;">ID</th>
+            <th>Tên role</th>
+            <th>Mô tả</th>
+            <th style="width:100px;">Trạng thái</th>
+            <th style="width:120px;">Users</th>
+            <th style="width:130px;">Thao tác</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var r in Model)
+        {
+            <tr>
+                <td>@r.Id</td>
+                <td>@r.Name</td>
+                <td>@(r.Description ?? "")</td>
+                <td>
+                    @if (r.IsActive)
+                    {
+                        <span class="badge bg-success">Active</span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-secondary">Inactive</span>
+                    }
+                </td>
+                <td>
+                    @if (r.UserCount > 0)
+                    {
+                        <a href="@Url.Action("Index", "Users", new { roleId = r.Id })"
+                           class="badge bg-secondary text-decoration-none">
+                            @r.UserCount user(s)
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="badge bg-light text-muted">0</span>
+                    }
+                </td>
+                <td>
+                    <form method="post"
+                          asp-controller="Roles"
+                          asp-action="ToggleActive"
+                          asp-route-id="@r.Id"
+                          class="d-inline">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="active" value="@(r.IsActive ? "false" : "true")" />
+                        <button type="submit" class="btn btn-sm @(r.IsActive ? "btn-outline-danger" : "btn-outline-success") me-1">
+                            @(r.IsActive ? "Khoá" : "Mở")
+                        </button>
+                    </form>
+
+                    <a class="btn btn-sm btn-outline-primary"
+                       href="@Url.Action("Edit", "Roles", new { id = r.Id })">
+                        Sửa
+                    </a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
