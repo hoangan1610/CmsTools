@@ -7,19 +7,18 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-
-
 namespace CmsTools.Controllers
 {
-    public class AccountController : Controller
+    public sealed class AccountController : Controller
     {
         private readonly ICmsUserService _userService;
+        private readonly IAuditLogger _auditLogger;
 
-        public AccountController(ICmsUserService userService)
+        public AccountController(ICmsUserService userService, IAuditLogger auditLogger)
         {
             _userService = userService;
+            _auditLogger = auditLogger;
         }
-
 
         [AllowAnonymous]
         [HttpGet]
@@ -32,65 +31,61 @@ namespace CmsTools.Controllers
         [AllowAnonymous]
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Login(string username, string password, string? returnUrl = null)
+        public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
         {
-            ViewData["ReturnUrl"] = returnUrl;
+            if (!ModelState.IsValid)
+                return View(model);
 
-            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-            {
-                ModelState.AddModelError(string.Empty, "Username và password không được trống.");
-                return View();
-            }
+            // tuỳ ICmsUserService của bạn, mình giả sử có ValidateUserAsync
+            var user = await _userService.ValidateUserAsync(model.Username, model.Password);
 
-            var user = await _userService.ValidateUserAsync(username, password);
             if (user == null)
             {
-                ModelState.AddModelError(string.Empty, "Sai username hoặc password.");
-                return View();
+                await _auditLogger.LogLoginAsync(
+                    HttpContext,
+                    username: model.Username,
+                    isSuccess: false,
+                    message: "Invalid username or password"
+                );
+
+                ModelState.AddModelError("", "Sai username hoặc password.");
+                return View(model);
             }
 
-            // ==== Lấy role & tạo claims ====
-            var roles = await _userService.GetUserRoleNamesAsync(user.Id);
-
-            var claims = new List<Claim>
-    {
-        new Claim(ClaimTypes.Name, user.Username),
-        new Claim("cms_user_id", user.Id.ToString())
-    };
-
-            var isAdmin = roles.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
-            if (isAdmin)
+            // === Đăng nhập thành công (cookie) ===
+            var claims = new[]
             {
-                claims.Add(new Claim("cms_is_admin", "1"));
-            }
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.Username),
+                new Claim("cms_user_id", user.Id.ToString()),
+                // nếu có flag is_admin:
+                new Claim("cms_is_admin", user.IsAdmin ? "1" : "0")
+            };
 
-            var identity = new ClaimsIdentity(
-                claims,
-                CookieAuthenticationDefaults.AuthenticationScheme);
-
+            var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
             var principal = new ClaimsPrincipal(identity);
 
             await HttpContext.SignInAsync(
                 CookieAuthenticationDefaults.AuthenticationScheme,
                 principal);
 
-            // ==== Redirect sau login ====
+            await _auditLogger.LogLoginAsync(
+                HttpContext,
+                username: user.Username,
+                isSuccess: true,
+                message: "Login success"
+            );
+
+            return RedirectToLocal(returnUrl);
+        }
+
+        private IActionResult RedirectToLocal(string? returnUrl)
+        {
             if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
                 return Redirect(returnUrl);
 
             return RedirectToAction("Index", "Home");
-
-            if (isAdmin)
-            {
-                // Admin → vào màn Schema quản trị
-                return RedirectToAction("Index", "Schema");
-            }
-
-            // Non-admin → tạm thời cho nhảy vào danh mục sản phẩm (tableId = 1)
-            // Sau này có thể query table_permission để tìm bảng đầu tiên mà user được xem.
-            return RedirectToAction("List", "Data", new { tableId = 1 });
         }
-
 
         [Authorize]
         [HttpPost]

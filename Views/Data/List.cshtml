@@ -24,6 +24,44 @@
         return false;
     }
 
+    string MaskPhone(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+
+        // bỏ khoảng trắng để mask, nhưng vẫn hiển thị nguyên bản s
+        var digits = new string(s.Where(char.IsDigit).ToArray());
+        if (digits.Length <= 5) return s; // quá ngắn, khỏi mask
+
+        // Ví dụ: 09*****123
+        var first = digits.Substring(0, 2);
+        var last = digits.Substring(digits.Length - 3);
+        var maskedCore = new string('*', digits.Length - 5);
+
+        // ghép lại theo pattern
+        return first + maskedCore + last;
+    }
+
+    string MaskEmail(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+
+        var atIndex = s.IndexOf('@');
+        if (atIndex <= 0) return s; // không giống email
+
+        var local = s.Substring(0, atIndex);
+        var domain = s.Substring(atIndex); // gồm luôn '@'
+
+        if (local.Length <= 1)
+        {
+            // a@domain -> giữ nguyên
+            return s;
+        }
+
+        // a***@domain.com
+        var firstChar = local[0];
+        return firstChar + new string('*', Math.Max(3, local.Length - 1)) + domain;
+    }
+
     string RenderCell(CmsTools.Models.CmsColumnMeta col, object? value)
     {
         if (value == null || value is DBNull) return string.Empty;
@@ -35,6 +73,19 @@
             return s;
 
         var lower = fmt.ToLowerInvariant();
+
+        // ======== MASK PHONE / EMAIL ========
+        if (lower.StartsWith("mask:"))
+        {
+            if (lower == "mask:phone")
+                return MaskPhone(s);
+
+            if (lower == "mask:email")
+                return MaskEmail(s);
+
+            // format mask khác chưa hỗ trợ -> trả về raw
+            return s;
+        }
 
         try
         {
@@ -74,9 +125,8 @@
         }
         return string.Empty;
     }
-
-    
 }
+
 
 
 

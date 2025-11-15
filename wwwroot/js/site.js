@@ -1,4 +1,22 @@
-﻿// Please see documentation at https://learn.microsoft.com/aspnet/core/client-side/bundling-and-minification
-// for details on configuring this project to bundle and minify static web assets.
+﻿// wwwroot/js/site.js
+(function () {
+    'use strict';
 
-// Write your JavaScript code.
+    // Đóng navbar collapse sau khi click link trên mobile
+    document.addEventListener('click', function (e) {
+        var target = e.target;
+        if (!target.closest) return;
+
+        var link = target.closest('.navbar-nav .nav-link');
+        if (!link) return;
+
+        var navCollapse = document.getElementById('cmsNavbar');
+        if (!navCollapse) return;
+
+        if (window.getComputedStyle(navCollapse).display !== 'none') {
+            var bsCollapse = bootstrap.Collapse.getInstance(navCollapse)
+                || new bootstrap.Collapse(navCollapse, { toggle: false });
+            bsCollapse.hide();
+        }
+    }, false);
+})();

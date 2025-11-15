@@ -1,13 +1,14 @@
-﻿using System;
-using System.Data;
-using System.Linq;
-using System.Threading.Tasks;
-using CmsTools.Models;
+﻿using CmsTools.Models;
+using CmsTools.Services;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace CmsTools.Controllers
 {
@@ -15,11 +16,15 @@ namespace CmsTools.Controllers
     public sealed class ProductsController : Controller
     {
         private readonly string _metaConn;
+        private readonly IAuditLogger _audit;
 
-        public ProductsController(IConfiguration cfg)
+        // ✅ FIX: inject cả IAuditLogger vào constructor
+        public ProductsController(IConfiguration cfg, IAuditLogger auditLogger)
         {
             _metaConn = cfg.GetConnectionString("CmsToolsDb")
                 ?? throw new Exception("Missing connection string: CmsToolsDb");
+
+            _audit = auditLogger;
         }
 
         // Lấy connection string business DB cho tbl_product_info từ meta
@@ -191,21 +196,40 @@ INSERT INTO dbo.tbl_product_variant(
 
             try
             {
-                await conn.ExecuteAsync(sqlInsert, new
-                {
-                    ProductId = model.ProductId,
-                    Name = string.IsNullOrWhiteSpace(model.Name) ? null : model.Name,
-                    Image = string.IsNullOrWhiteSpace(model.Image) ? null : model.Image,
-                    MetaData = string.IsNullOrWhiteSpace(model.MetaData) ? null : model.MetaData,
-                    Sku = model.Sku.Trim(),
-                    Weight = model.Weight,
-                    CostPrice = model.CostPrice ?? 0m,
-                    FinishedCost = model.FinishedCost ?? 0m,
-                    WholesalePrice = model.WholesalePrice ?? 0m,
-                    RetailPrice = model.RetailPrice ?? 0m,
-                    Stock = model.Stock ?? 0,
-                    Status = model.Status
-                });
+                var variantId = await conn.ExecuteScalarAsync<long>(
+                    sqlInsert + @"
+SELECT CAST(SCOPE_IDENTITY() AS bigint);",
+                    new
+                    {
+                        ProductId = model.ProductId,
+                        Name = string.IsNullOrWhiteSpace(model.Name) ? null : model.Name,
+                        Image = string.IsNullOrWhiteSpace(model.Image) ? null : model.Image,
+                        MetaData = string.IsNullOrWhiteSpace(model.MetaData) ? null : model.MetaData,
+                        Sku = model.Sku.Trim(),
+                        Weight = model.Weight,
+                        CostPrice = model.CostPrice ?? 0m,
+                        FinishedCost = model.FinishedCost ?? 0m,
+                        WholesalePrice = model.WholesalePrice ?? 0m,
+                        RetailPrice = model.RetailPrice ?? 0m,
+                        Stock = model.Stock ?? 0,
+                        Status = model.Status
+                    });
+
+                // === LOG ACTION: tạo variant ===
+                await _audit.LogActionAsync(
+                    HttpContext,
+                    action: "variant_create",
+                    entity: "tbl_product_variant",
+                    entityId: variantId,
+                    details: new
+                    {
+                        productId = model.ProductId,
+                        sku = model.Sku?.Trim(),
+                        name = model.Name,
+                        retailPrice = model.RetailPrice,
+                        stock = model.Stock,
+                        status = model.Status
+                    });
             }
             catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
             {
@@ -336,6 +360,22 @@ WHERE id = @Id AND product_id = @ProductId;";
 
                 if (affected <= 0)
                     return NotFound("Variant không tồn tại hoặc không thuộc product này.");
+
+                // === LOG ACTION: update variant ===
+                await _audit.LogActionAsync(
+                    HttpContext,
+                    action: "variant_update",
+                    entity: "tbl_product_variant",
+                    entityId: id,
+                    details: new
+                    {
+                        productId,
+                        sku = model.Sku?.Trim(),
+                        name = model.Name,
+                        retailPrice = model.RetailPrice,
+                        stock = model.Stock,
+                        status = model.Status
+                    });
             }
             catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
             {
@@ -359,22 +399,45 @@ WHERE id = @Id AND product_id = @ProductId;";
             await using var conn = new SqlConnection(bizConnStr);
             await conn.OpenAsync();
 
-            const string sql = @"
-DECLARE @current tinyint;
+            // 1) Lấy status hiện tại
+            var current = await conn.ExecuteScalarAsync<byte?>(
+                @"SELECT status FROM dbo.tbl_product_variant 
+                  WHERE id = @Id AND product_id = @ProductId;",
+                new { Id = id, ProductId = productId });
 
-SELECT @current = status
-FROM dbo.tbl_product_variant
-WHERE id = @Id AND product_id = @ProductId;
+            if (!current.HasValue)
+                return NotFound("Variant không tồn tại.");
 
-IF @current IS NOT NULL
-BEGIN
-    UPDATE dbo.tbl_product_variant
-    SET status = CASE WHEN @current = 1 THEN 0 ELSE 1 END,
-        updated_at = SYSUTCDATETIME()
-    WHERE id = @Id AND product_id = @ProductId;
-END";
+            var newStatus = (byte)(current.Value == 1 ? 0 : 1);
 
-            await conn.ExecuteAsync(sql, new { Id = id, ProductId = productId });
+            // 2) Cập nhật
+            var affected = await conn.ExecuteAsync(
+                @"UPDATE dbo.tbl_product_variant
+                  SET status = @Status,
+                      updated_at = SYSUTCDATETIME()
+                  WHERE id = @Id AND product_id = @ProductId;",
+                new
+                {
+                    Status = newStatus,
+                    Id = id,
+                    ProductId = productId
+                });
+
+            if (affected <= 0)
+                return NotFound("Không cập nhật được trạng thái variant.");
+
+            // 3) Ghi log
+            await _audit.LogActionAsync(
+                HttpContext,
+                action: "variant_toggle_status",
+                entity: "tbl_product_variant",
+                entityId: id,
+                details: new
+                {
+                    productId,
+                    fromStatus = current.Value,
+                    toStatus = newStatus
+                });
 
             return RedirectToAction("Detail", new { id = productId });
         }

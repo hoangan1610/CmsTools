@@ -20,13 +20,15 @@ namespace CmsTools.Controllers
     {
         private readonly string _metaConn;
         private readonly ICmsPasswordHasher _hasher;
+        private readonly IAuditLogger _audit;   // 👈 thêm
 
-        public UsersController(IConfiguration cfg, ICmsPasswordHasher hasher)
+        public UsersController(IConfiguration cfg, ICmsPasswordHasher hasher, IAuditLogger auditLogger)
         {
             _metaConn = cfg.GetConnectionString("CmsToolsDb")
                 ?? throw new Exception("Missing connection string: CmsToolsDb");
 
             _hasher = hasher;
+            _audit = auditLogger;               // 👈 gán
         }
 
         private IDbConnection OpenMeta() => new SqlConnection(_metaConn);
@@ -127,6 +129,10 @@ WHERE user_id = @uid;";
         {
             using var conn = OpenMeta();
 
+            var username = await conn.ExecuteScalarAsync<string>(
+    "SELECT username FROM dbo.tbl_cms_user WHERE id = @id;",
+    new { id });
+
             // Mở connection trước khi BeginTransaction
             if (conn is SqlConnection sqlConn)
                 await sqlConn.OpenAsync();
@@ -193,6 +199,19 @@ VALUES (@UserId, @RoleId);";
                 }
 
                 tx.Commit();
+
+                await _audit.LogActionAsync(
+    HttpContext,
+    action: "cms_user_edit",
+    entity: "tbl_cms_user",
+    entityId: id,
+    details: new
+    {
+        username,
+        fullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName,
+        isActive,
+        selectedRoleIds = selectedRoleIds.Distinct().ToArray()
+    });
             }
             catch
             {
@@ -318,6 +337,18 @@ ORDER BY name;";
 
                 tran.Commit();
                 TempData["UsersMessage"] = "Đã tạo user mới.";
+
+                await _audit.LogActionAsync(
+    HttpContext,
+    action: "cms_user_create",
+    entity: "tbl_cms_user",
+    entityId: userId,
+    details: new
+    {
+        username,
+        fullName = string.IsNullOrWhiteSpace(fullName) ? null : fullName,
+        roleIds = roleIds.Distinct().ToArray()
+    });
                 return RedirectToAction("Index");
             }
             catch
@@ -408,7 +439,21 @@ WHERE id = @Id;";
 
             TempData["UsersMessage"] = $"Đã đổi mật khẩu cho user '{(string)row.username}'.";
 
+            // 👇 GHI LOG (không log password)
+            await _audit.LogActionAsync(
+                HttpContext,
+                action: "cms_user_change_password",
+                entity: "tbl_cms_user",
+                entityId: id,
+                details: new
+                {
+                    username = (string)row.username
+                });
+
             return RedirectToAction("Index");
+
+
+           
         }
 
         // ===================== TOGGLE ACTIVE (LOCK/UNLOCK) =====================
@@ -436,8 +481,48 @@ WHERE id = @Id;";
                 ? "Đã mở khoá user."
                 : "Đã khoá user.";
 
+            await _audit.LogActionAsync(
+    HttpContext,
+    action: "cms_user_toggle_active",
+    entity: "tbl_cms_user",
+    entityId: id,
+    details: new
+    {
+        from = current.Value,
+        to = newVal
+    });
+
             return RedirectToAction("Index");
         }
 
+        [HttpGet]
+        public async Task<IActionResult> LoginLogs(int top = 200)
+        {
+            using var conn = OpenMeta();
+
+            const string sql = @"
+SELECT TOP (@top)
+    id              AS Id,
+    cms_user_id     AS CmsUserId,
+    username        AS Username,
+    is_success      AS IsSuccess,
+    ip              AS Ip,
+    user_agent      AS UserAgent,
+    message         AS Message,
+    created_at_utc  AS CreatedAtUtc
+FROM dbo.tbl_cms_login_log
+ORDER BY created_at_utc DESC, id DESC;";
+
+            var rows = (await conn.QueryAsync<CmsLoginLogItem>(
+                sql,
+                new { top }))
+                .ToList();
+
+            return View(rows);  // Views/Users/LoginLogs.cshtml
+        }
+
+
     }
+
+
 }

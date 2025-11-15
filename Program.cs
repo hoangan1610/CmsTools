@@ -25,8 +25,10 @@ builder.Services.AddScoped<ICmsUserService, CmsUserService>();
 builder.Services.AddScoped<ICmsPermissionService, CmsPermissionService>();
 builder.Services.AddScoped<ICmsAuditLogger, CmsAuditLogger>();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICmsAuditLogger, CmsAuditLogger>();
 
+
+// Login / action audit
+builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 // Auth: Cookie
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

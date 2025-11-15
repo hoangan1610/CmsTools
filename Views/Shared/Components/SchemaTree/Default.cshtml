@@ -1,14 +1,14 @@
 ﻿@model CmsTools.Models.SchemaTreeViewModel
 
-<div class="cmstree border-end bg-light h-100">
-    <div class="p-2 border-bottom">
-        <strong>Connections</strong>
+<div class="cmstree bg-light h-100">
+    <div class="p-2 border-bottom schema-tree-header">
+        <strong class="small text-uppercase text-muted">Connections</strong>
     </div>
 
     @if (Model.Items == null || Model.Items.Count == 0)
     {
         <div class="p-2 small text-muted">
-            Chưa có connection nào.
+            Chưa có bảng nào được cấp quyền xem.
         </div>
     }
     else
@@ -51,10 +51,10 @@
                                     <li class="list-group-item list-group-item-action px-2 py-1 @(isActive ? "active" : "")">
                                         <a class="d-flex justify-content-between align-items-center text-decoration-none @(isActive ? "text-white" : "")"
                                            href="/Data/List?tableId=@t.Id">
-                                            <span class="small">
+                                            <span class="small text-truncate me-2">
                                                 @(t.DisplayName ?? t.TableName)
                                             </span>
-                                            <span class="badge bg-secondary bg-opacity-50">
+                                            <span class="badge bg-secondary bg-opacity-50 text-wrap schema-badge-schema">
                                                 @t.SchemaName.@t.TableName
                                             </span>
                                         </a>
@@ -68,20 +68,3 @@
         </div>
     }
 </div>
-
-<style>
-    .cmstree {
-        font-size: 0.875rem;
-    }
-
-    .cmstree-tables .list-group-item {
-        border-left: none;
-        border-right: none;
-        border-radius: 0;
-    }
-
-        .cmstree-tables .list-group-item.active {
-            background-color: #0d6efd;
-            border-color: #0d6efd;
-        }
-</style>

@@ -31,7 +31,11 @@ namespace CmsTools.Services
             public bool IsActive { get; set; }
             public byte[] PasswordHash { get; set; } = default!;
             public byte[] Salt { get; set; } = default!;
+
+            // 👇 THÊM
+            public bool IsAdmin { get; set; }
         }
+
 
         public async Task<CmsUser?> ValidateUserAsync(string username, string password)
         {
@@ -42,10 +46,12 @@ SELECT
     full_name     AS FullName,
     is_active     AS IsActive,
     password_hash AS PasswordHash,
-    salt          AS Salt
+    salt          AS Salt,
+    is_admin      AS IsAdmin      -- 👈 THÊM
 FROM dbo.tbl_cms_user
 WHERE username = @username
   AND is_active = 1;";
+
 
             using var conn = OpenMeta();
             var row = await conn.QueryFirstOrDefaultAsync<CmsUserRow>(
@@ -66,8 +72,10 @@ WHERE username = @username
                 Id = row.Id,
                 Username = row.Username,
                 FullName = row.FullName,
-                IsActive = row.IsActive
+                IsActive = row.IsActive,
+                IsAdmin = row.IsAdmin       // 👈 THÊM
             };
+
         }
 
         public async Task<IReadOnlyList<string>> GetUserRoleNamesAsync(int userId)

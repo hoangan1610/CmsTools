@@ -6,5 +6,7 @@
         public string Username { get; set; } = default!;
         public string? FullName { get; set; }
         public bool IsActive { get; set; }
+
+        public bool IsAdmin { get; set; }
     }
 }
