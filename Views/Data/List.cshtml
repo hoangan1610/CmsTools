@@ -251,12 +251,22 @@
                                 Xem
                             </a>
                         }
+
+                        @* 👉 Nút custom detail theo meta, dùng chung cho mọi bảng *@
+                        if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                        {
+                            var idStr = idValue.ToString();
+                            var url = Model.Table.CustomDetailUrl
+                            .Replace("{id}", idStr)   // pattern chính
+                            .Replace("{pk}", idStr);  // optional, nếu sau này muốn dùng {pk}
+
+                            <a class="btn btn-sm btn-outline-secondary me-1"
+                               href="@url">
+                                Chi tiết
+                            </a>
+                        }
                     }
 
-
-
-                    @* nút Ẩn/Kích hoạt nếu có cột status *@
-                    @* nút Ẩn/Kích hoạt: chỉ khi có quyền Update hoặc Delete *@
                     @if (idValue != null
                                     && Model.Permission != null
                                     && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
@@ -296,6 +306,7 @@
                         </form>
                     }
                 </td>
+
             </tr>
         }
 

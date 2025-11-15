@@ -55,8 +55,20 @@ ORDER BY r.name;";
         }
 
         // ===== 2) EDIT (GET): sửa permission của 1 role =====
+        // ===== 2) EDIT (GET): sửa permission của 1 role =====
         [HttpGet]
         public async Task<IActionResult> Edit(int roleId)
+        {
+            var vm = await BuildPermissionViewModelAsync(roleId, permSourceRoleId: null);
+            if (vm == null)
+                return NotFound("Role không tồn tại.");
+
+            return View(vm); // Views/Permissions/Edit.cshtml
+        }
+
+        private async Task<TablePermissionEditViewModel?> BuildPermissionViewModelAsync(
+    int roleId,
+    int? permSourceRoleId)
         {
             using var conn = OpenMeta();
 
@@ -67,9 +79,23 @@ WHERE id = @id;";
 
             var role = await conn.QueryFirstOrDefaultAsync(roleSql, new { id = roleId });
             if (role == null)
-                return NotFound("Role không tồn tại.");
+                return null;
 
-            // Lấy tất cả bảng đã cấu hình + permission (nếu có) cho role này
+            // Danh sách role khác để hiển thị trong dropdown copy
+            const string rolesSql = @"
+SELECT id AS Id, name AS Name
+FROM dbo.tbl_cms_role
+WHERE id <> @roleId
+ORDER BY name;";
+
+            var copyRoles = (await conn.QueryAsync<CmsRoleOption>(
+                rolesSql,
+                new { roleId }))
+                .ToList();
+
+            // Nếu không chỉ định permSourceRoleId -> dùng chính roleId (bình thường)
+            var permRoleId = permSourceRoleId ?? roleId;
+
             const string tableSql = @"
 SELECT 
     t.id                  AS TableId,
@@ -86,40 +112,37 @@ FROM dbo.tbl_cms_table t
 JOIN dbo.tbl_cms_connection c
     ON t.connection_id = c.id
 LEFT JOIN dbo.tbl_cms_table_permission tp
-    ON tp.table_id = t.id AND tp.role_id = @roleId
+    ON tp.table_id = t.id AND tp.role_id = @permRoleId
 WHERE t.is_enabled = 1
 ORDER BY c.name, t.schema_name, t.table_name;";
 
-            var rows = await conn.QueryAsync(tableSql, new { roleId });
+            var rows = await conn.QueryAsync(tableSql, new { permRoleId });
 
             var items = rows.Select(r => new TablePermissionItem
             {
                 TableId = r.TableId,
                 TableName = $"{(string)r.SchemaName}.{(string)r.TableName}",
                 DisplayName = string.IsNullOrWhiteSpace((string?)r.DisplayName)
-         ? $"{(string)r.SchemaName}.{(string)r.TableName}"
-         : (string)r.DisplayName,
+                    ? $"{(string)r.SchemaName}.{(string)r.TableName}"
+                    : (string)r.DisplayName,
                 ConnectionName = r.ConnectionName,
-
-                // 👇 SỬA 4 dòng này
                 CanView = (bool)r.CanView,
                 CanCreate = (bool)r.CanCreate,
                 CanUpdate = (bool)r.CanUpdate,
                 CanDelete = (bool)r.CanDelete,
-
                 RowFilter = r.RowFilter
             }).ToList();
 
-
-            var vm = new TablePermissionEditViewModel
+            return new TablePermissionEditViewModel
             {
                 RoleId = roleId,
                 RoleName = role.name,
-                Items = items
+                Items = items,
+                CopyRoles = copyRoles,
+                CopyFromRoleId = permSourceRoleId
             };
-
-            return View(vm); // Views/Permissions/Edit.cshtml
         }
+
 
         // ===== 3) EDIT (POST): lưu permission cho role =====
         [HttpPost]
@@ -198,6 +221,29 @@ VALUES (
                 throw;
             }
         }
+
+        // ===== COPY QUYỀN TỪ ROLE KHÁC (chỉ load form, chưa lưu DB) =====
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyFrom(int roleId, int? fromRoleId)
+        {
+            if (roleId <= 0)
+                return BadRequest("RoleId không hợp lệ.");
+
+            if (fromRoleId == null || fromRoleId <= 0)
+            {
+                // Không chọn role nguồn -> quay lại Edit bình thường
+                return RedirectToAction("Edit", new { roleId });
+            }
+
+            var vm = await BuildPermissionViewModelAsync(roleId, permSourceRoleId: fromRoleId);
+            if (vm == null)
+                return NotFound("Role không tồn tại.");
+
+            TempData["PermMessage"] = $"Đã nạp quyền từ role ID {fromRoleId}. Nhớ bấm Lưu để ghi xuống DB.";
+            return View("Edit", vm);
+        }
+
 
         // ===== INDEX THEO BẢNG: filter + highlight bảng "mồ côi" =====
         [HttpGet]

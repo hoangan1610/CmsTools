@@ -6,81 +6,110 @@
 
 <h2 class="mt-3 mb-3">Permissions theo bảng</h2>
 
+<p class="text-muted">
+    Bảng được đánh dấu <span class="badge bg-danger">Mồ côi</span> là những bảng
+    <strong>không có bất kỳ role nào có quyền xem (CanView)</strong>.
+</p>
+
 <form method="get" class="row g-2 mb-3">
-    <div class="col-12 col-md-3">
+    <div class="col-md-3 col-12">
         <label class="form-label small">Connection</label>
         <select name="connectionId" class="form-select form-select-sm">
             <option value="">-- Tất cả --</option>
-            @foreach (var c in Model.Connections)
+            @if (Model.Connections != null)
             {
-                var selected = Model.ConnectionId.HasValue && Model.ConnectionId.Value == c.Id;
-                <option value="@c.Id" selected="@(selected ? "selected" : null)">
-                    @c.Name
-                </option>
+                foreach (var c in Model.Connections)
+                {
+                    var isSelected = Model.ConnectionId.HasValue && Model.ConnectionId.Value == c.Id;
+
+                    <option value="@c.Id" selected="@(isSelected ? "selected" : null)">
+                        @c.Name
+                    </option>
+                }
             }
         </select>
+
     </div>
 
-    <div class="col-12 col-md-4">
-        <label class="form-label small">Tìm theo schema/table/display</label>
-        <input name="q"
+    <div class="col-md-5 col-12">
+        <label class="form-label small">Tìm theo tên bảng / schema / display name / connection</label>
+        <input type="text"
+               name="q"
+               value="@(Model.Search ?? "")"
                class="form-control form-control-sm"
-               value="@(Model.Search ?? "")" />
+               placeholder="Nhập từ khoá..." />
     </div>
 
-    <div class="col-12 col-md-3 align-self-end">
-        <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
-        <a class="btn btn-outline-secondary btn-sm"
-           href="@Url.Action("Tables", "Permissions")">
+    <div class="col-md-4 col-12 d-flex align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm me-2">
+            Lọc
+        </button>
+        <a href="@Url.Action("Tables", "Permissions")"
+           class="btn btn-outline-secondary btn-sm">
             Xoá lọc
         </a>
     </div>
 </form>
 
-<div class="table-responsive">
-    <table class="table table-sm table-bordered align-middle">
-        <thead class="table-light">
-            <tr>
-                <th>Connection</th>
-                <th>Schema.Table</th>
-                <th>Display name</th>
-                <th style="width:160px;">Trạng thái</th>
-            </tr>
-        </thead>
-        <tbody>
-            @if (Model.Items == null || Model.Items.Count == 0)
-            {
+@if (Model.Items == null || !Model.Items.Any())
+{
+    <p class="text-muted">Không tìm thấy bảng nào phù hợp.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
                 <tr>
-                    <td colspan="4" class="text-center text-muted">
-                        Không có bảng nào.
-                    </td>
+                    <th>Connection</th>
+                    <th>Schema</th>
+                    <th>Tên bảng</th>
+                    <th>Tên hiển thị</th>
+                    <th style="width:120px;">Trạng thái</th>
+                    <th style="width:260px;">Thao tác</th>
                 </tr>
-            }
-            else
-            {
-                foreach (var t in Model.Items)
+            </thead>
+            <tbody>
+                @foreach (var t in Model.Items)
                 {
-                    var trClass = t.HasViewRole ? "" : "table-warning";
+                    var isOrphan = !t.HasViewRole;
+                    var trClass = isOrphan ? "table-danger" : "";
 
                     <tr class="@trClass">
                         <td>@t.ConnectionName</td>
-                        <td><code>@t.SchemaName.@t.TableName</code></td>
-                        <td>@(t.DisplayName ?? t.TableName)</td>
+                        <td>@t.SchemaName</td>
+                        <td>@t.TableName</td>
+                        <td>@(string.IsNullOrWhiteSpace(t.DisplayName) ? "(chưa đặt)" : t.DisplayName)</td>
                         <td>
                             @if (t.HasViewRole)
                             {
-                                <span class="badge bg-success">Ít nhất 1 role có CanView</span>
+                                <span class="badge bg-success">Có role xem</span>
                             }
                             else
                             {
-                                <span class="badge bg-danger">
-                                    Bảng "mồ côi" (chưa role nào có CanView)
-                                </span>
+                                <span class="badge bg-danger">Mồ côi</span>
                             }
+                        </td>
+                        <td>
+                            <a class="btn btn-sm btn-outline-secondary me-1"
+                               href="@Url.Action("Columns", "Schema", new { tableId = t.TableId })">
+                                Cấu hình cột
+                            </a>
+
+                            <a class="btn btn-sm btn-outline-primary me-1"
+                               href="@Url.Action("List", "Data", new { tableId = t.TableId })"
+                               target="_blank">
+                                Xem dữ liệu
+                            </a>
+
+                            <a class="btn btn-sm btn-outline-dark"
+                               href="@Url.Action("Index", "Permissions")">
+                                Phân quyền theo role
+                            </a>
                         </td>
                     </tr>
                 }
-            }
-        </tbody>
-    </table>
-</div>
+            </tbody>
+        </table>
+    </div>
+}

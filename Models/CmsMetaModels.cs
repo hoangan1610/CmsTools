@@ -22,6 +22,9 @@ namespace CmsTools.Models
         public bool IsView { get; set; }
         public bool IsEnabled { get; set; } = true;
         public string? RowFilter { get; set; }
+
+        public string? CustomDetailUrl { get; set; }   // ví dụ: /Products/Detail/{id}
+
         public string FullName => $"[{SchemaName}].[{TableName}]";
     }
 

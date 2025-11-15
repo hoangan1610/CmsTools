@@ -32,7 +32,8 @@ SELECT id,
        primary_key   AS PrimaryKey,
        is_view       AS IsView,
        is_enabled    AS IsEnabled,
-row_filter    AS RowFilter 
+row_filter    AS RowFilter ,
+custom_detail_url AS CustomDetailUrl
 FROM dbo.tbl_cms_table
 WHERE id = @id AND is_enabled = 1;";
 
@@ -112,7 +113,8 @@ SELECT id,
        primary_key   AS PrimaryKey,
        is_view       AS IsView,
        is_enabled    AS IsEnabled,
-       row_filter    AS RowFilter
+       row_filter    AS RowFilter,
+custom_detail_url AS CustomDetailUrl 
 FROM dbo.tbl_cms_table
 WHERE connection_id = @connectionId
   AND is_enabled = 1

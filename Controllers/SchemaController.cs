@@ -33,24 +33,25 @@ namespace CmsTools.Controllers
         public async Task<IActionResult> Index()
         {
             const string sql = @"
-SELECT  t.id                AS Id,
-        t.connection_id      AS ConnectionId,
-        c.name               AS ConnectionName,
-        t.schema_name        AS SchemaName,
-        t.table_name         AS TableName,
-        t.display_name       AS DisplayName,
-        t.primary_key        AS PrimaryKey
+SELECT 
+    t.id                AS Id,
+    t.connection_id     AS ConnectionId,
+    c.name              AS ConnectionName,
+    t.schema_name       AS SchemaName,
+    t.table_name        AS TableName,
+    t.display_name      AS DisplayName,
+    t.primary_key       AS PrimaryKey,
+    t.custom_detail_url AS CustomDetailUrl       -- 👈 thêm dòng này
 FROM dbo.tbl_cms_table t
-JOIN dbo.tbl_cms_connection c ON t.connection_id = c.id
-WHERE t.is_enabled = 1
-  AND c.is_active = 1
+JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
 ORDER BY c.name, t.schema_name, t.table_name;";
 
-            using var conn = OpenMeta();
+            await using var conn = new SqlConnection(_metaConn);
             var rows = (await conn.QueryAsync<CmsTableListItem>(sql)).ToList();
 
-            return View(rows); // Views/Schema/Index.cshtml
+            return View(rows);
         }
+
 
         // ===== 2) COLUMNS: cấu hình cột cho 1 bảng =====
 

@@ -12,5 +12,7 @@
 
         public string? DisplayName { get; set; }
         public string? PrimaryKey { get; set; }
+
+        public string? CustomDetailUrl { get; set; }
     }
 }

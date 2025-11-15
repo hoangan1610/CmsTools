@@ -6,6 +6,50 @@
 
 <h2 class="mt-3 mb-3">Sửa quyền cho role: @Model.RoleName</h2>
 
+@if (TempData["PermMessage"] is string msg && !string.IsNullOrWhiteSpace(msg))
+{
+    <div class="alert alert-info">@msg</div>
+}
+
+@if (Model.CopyRoles != null && Model.CopyRoles.Count > 0)
+{
+    <form asp-controller="Permissions"
+          asp-action="CopyFrom"
+          method="post"
+          class="row g-2 mb-3">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="roleId" value="@Model.RoleId" />
+
+        <div class="col-auto">
+            <label class="form-label small mb-0">Copy quyền từ role khác:</label>
+        </div>
+        <div class="col-auto">
+            <select name="fromRoleId" class="form-select form-select-sm">
+                <option value="">-- Chọn role nguồn --</option>
+                @foreach (var r in Model.CopyRoles)
+                {
+                    var selected = Model.CopyFromRoleId.HasValue && Model.CopyFromRoleId.Value == r.Id;
+
+                    <option value="@r.Id" selected="@(selected ? "selected" : null)">
+                        @r.Name
+                    </option>
+                }
+            </select>
+
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                Copy
+            </button>
+        </div>
+        <div class="col-12">
+            <small class="text-muted">
+                Copy chỉ <strong>nạp vào form</strong>, bạn vẫn cần bấm <strong>Lưu quyền</strong> để ghi xuống DB.
+            </small>
+        </div>
+    </form>
+}
+
 <form asp-controller="Permissions" asp-action="Edit" method="post">
     @Html.AntiForgeryToken()
 

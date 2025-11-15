@@ -55,7 +55,9 @@ else
                                 <th>Tên bảng</th>
                                 <th>Tên hiển thị</th>
                                 <th>Primary key</th>
-                                <th style="width:220px;">Thao tác</th>
+                                <th>Custom detail URL</th>
+                                <th style="width:260px;">Thao tác</th>
+
                             </tr>
                         </thead>
                         <tbody>
@@ -71,18 +73,44 @@ else
                                     <td>@t.TableName</td>
                                     <td>@display</td>
                                     <td>@(t.PrimaryKey ?? "")</td>
+
+                                    <td>
+                                        @if (!string.IsNullOrWhiteSpace(t.CustomDetailUrl))
+                                        {
+                                            <code>@t.CustomDetailUrl</code>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                    </td>
+
                                     <td>
                                         <a class="btn btn-sm btn-outline-secondary me-2"
                                            href="@Url.Action("Columns", "Schema", new { tableId = t.Id })">
                                             Cấu hình cột
                                         </a>
 
-                                        <a class="btn btn-sm btn-outline-primary"
+                                        <a class="btn btn-sm btn-outline-primary me-2"
                                            href="@Url.Action("List", "Data", new { tableId = t.Id })"
                                            target="_blank">
                                             Xem dữ liệu
                                         </a>
+
+                                        @* optional: shortcut đi tới Detail nếu có URL *@
+                                        @if (!string.IsNullOrWhiteSpace(t.CustomDetailUrl))
+                                        {
+                                            // demo: thay {id} = 0 cho dễ test
+                                            var sampleUrl = t.CustomDetailUrl.Replace("{id}", "0");
+
+                                            <a class="btn btn-sm btn-outline-secondary"
+                                               href="@sampleUrl"
+                                               target="_blank">
+                                                Thử URL
+                                            </a>
+                                        }
                                     </td>
+
                                 </tr>
                             }
                         </tbody>

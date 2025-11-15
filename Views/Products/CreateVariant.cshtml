@@ -1,0 +1,81 @@
+﻿@model CmsTools.Models.ProductVariantEditViewModel
+
+@{
+    ViewData["Title"] = "Thêm variant - " + Model.ProductName;
+}
+
+<h2 class="mt-3 mb-3">Thêm variant</h2>
+<p class="text-muted">Product: <strong>@Model.ProductName</strong> (ID: @Model.ProductId)</p>
+
+<form asp-action="CreateVariant" asp-controller="Products" method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="ProductId" />
+
+    <div class="mb-3">
+        <label asp-for="Name" class="form-label">Tên variant</label>
+        <input asp-for="Name" class="form-control" />
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Sku" class="form-label">SKU</label>
+        <input asp-for="Sku" class="form-control" />
+        <span asp-validation-for="Sku" class="text-danger"></span>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Image" class="form-label">Ảnh (URL)</label>
+        <input asp-for="Image" class="form-control" />
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="MetaData" class="form-label">Meta data (JSON)</label>
+        <textarea asp-for="MetaData" class="form-control" rows="3"></textarea>
+        <small class="text-muted">Phải là JSON hợp lệ nếu không sẽ vi phạm constraint isjson.</small>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label asp-for="Weight" class="form-label">Weight</label>
+            <input asp-for="Weight" class="form-control" />
+        </div>
+        <div class="col-md-6 mb-3">
+            <label asp-for="Stock" class="form-label">Stock</label>
+            <input asp-for="Stock" class="form-control" />
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-3 mb-3">
+            <label asp-for="CostPrice" class="form-label">Cost price</label>
+            <input asp-for="CostPrice" class="form-control" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label asp-for="FinishedCost" class="form-label">Finished cost</label>
+            <input asp-for="FinishedCost" class="form-control" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label asp-for="WholesalePrice" class="form-label">Wholesale</label>
+            <input asp-for="WholesalePrice" class="form-control" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label asp-for="RetailPrice" class="form-label">Retail</label>
+            <input asp-for="RetailPrice" class="form-control" />
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label asp-for="Status" class="form-label">Status</label>
+        <select asp-for="Status" class="form-select">
+            <option value="1">Active</option>
+            <option value="0">Inactive</option>
+        </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+    <a class="btn btn-secondary"
+       asp-controller="Products"
+       asp-action="Detail"
+       asp-route-id="@Model.ProductId">
+        Quay lại
+    </a>
+</form>
