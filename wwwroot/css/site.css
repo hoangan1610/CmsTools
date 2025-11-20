@@ -143,3 +143,132 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* ===== Layout chung cho trang data list ===== */
+
+.cmstools-page-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.cmstools-page-title {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.cmstools-page-subtitle {
+    font-size: 0.875rem;
+    color: #6c757d;
+}
+
+.cmstools-page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ===== Filter form ===== */
+
+.cmstools-filter-row .form-label {
+    font-weight: 500;
+}
+
+/* ===== Bảng dữ liệu ===== */
+
+.cmstools-table-container {
+    max-width: 100%;
+    position: relative;
+}
+
+.cmstools-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+    /* làm scrollbar thấp xuống một chút, dễ nhìn hơn */
+    .cmstools-table-scroll::-webkit-scrollbar {
+        height: 6px;
+    }
+
+    .cmstools-table-scroll::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+
+    .cmstools-table-scroll::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+
+        .cmstools-table-scroll::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+.cmstools-table {
+    white-space: nowrap; /* mỗi cell không wrap, dùng scroll ngang */
+}
+
+.cmstools-th {
+    font-size: 0.8rem;
+    vertical-align: middle;
+}
+
+.cmstools-td {
+    font-size: 0.8rem;
+    vertical-align: middle;
+}
+
+/* ảnh thumbnail trong cell */
+.cmstools-img-thumb {
+    max-height: 40px;
+    max-width: 80px;
+    object-fit: contain;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.05);
+}
+
+/* nhỏ lại padding để đỡ chiếm chỗ */
+.cmstools-table.table-sm > :not(caption) > * > * {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+.cmstools-th-actions,
+.cmstools-td-actions {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background-color: #fff;
+}
+
+/* Cho header cao hơn chút để đè lên cell */
+.cmstools-th-actions {
+    z-index: 4;
+}
+/* Cho body scroll khi modal mở (phòng trường hợp bị khóa cứng) */
+.modal-open {
+    overflow: hidden;
+}
+
+/* Đảm bảo phần thân modal scroll được, kể cả form dài */
+.modal-dialog-scrollable .modal-body {
+    max-height: calc(100vh - 160px); /* chừa header + footer */
+    overflow-y: auto;
+}
+
+/* Cho modal full chiều cao cũng mượt hơn trên màn hình nhỏ */
+.modal-dialog.modal-lg {
+    margin: 1.5rem auto;
+}
+.cmstools-modal-error .alert-danger {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}

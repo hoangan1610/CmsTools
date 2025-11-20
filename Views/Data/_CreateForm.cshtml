@@ -1,0 +1,232 @@
+﻿@model CmsTools.Models.DataCreateViewModel
+@using CmsTools.Models
+@using System.Globalization
+
+@functions {
+    bool IsTextArea(CmsColumnMeta col)
+    {
+        var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
+        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+        if (name.Contains("description") ||
+            name.Contains("mo_ta") ||
+            name.Contains("content") ||
+            name.Contains("noi_dung") ||
+            name.Contains("note") ||
+            name.Contains("ghi_chu"))
+            return true;
+
+        if (dataType.Contains("text"))
+            return true;
+
+        if ((dataType.StartsWith("nvarchar") || dataType.StartsWith("varchar")) &&
+            dataType.Contains("(max)"))
+            return true;
+
+        return false;
+    }
+
+    bool IsImageCol(CmsColumnMeta col)
+    {
+        var name = col.ColumnName ?? string.Empty;
+
+        if (!string.IsNullOrEmpty(col.Format) &&
+            col.Format.Equals("image", System.StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.IndexOf("image", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            name.IndexOf("img", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            name.IndexOf("photo", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+            name.IndexOf("avatar", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        return false;
+    }
+
+    bool IsBoolCol(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
+        return t.StartsWith("bit");
+    }
+
+    string InputTypeFor(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+        if (t.StartsWith("bigint") ||
+            t.StartsWith("int") ||
+            t.StartsWith("smallint") ||
+            t.StartsWith("tinyint") ||
+            t.StartsWith("decimal") ||
+            t.StartsWith("numeric"))
+            return "number";
+
+        if (t.StartsWith("datetime") || t.StartsWith("date"))
+            return "text"; // dễ nhập dd/MM/yyyy
+
+        return "text";
+    }
+
+    string? StepFor(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
+        if (t.StartsWith("decimal") || t.StartsWith("numeric"))
+            return "0.01";
+
+        if (t.StartsWith("tinyint") || t.StartsWith("smallint") ||
+            t.StartsWith("int") || t.StartsWith("bigint"))
+            return "1";
+
+        return null;
+    }
+
+    bool IsRequired(CmsColumnMeta col)
+    {
+        // editable + NOT NULL + không có default_expr → bắt user nhập
+        return col.IsEditable && !col.IsNullable && string.IsNullOrWhiteSpace(col.DefaultExpr);
+    }
+
+    int? GetMaxLength(CmsColumnMeta col)
+    {
+        var dt = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+        // parse nvarchar(50), varchar(200), char(10)...
+        int start = dt.IndexOf('(');
+        int end = dt.IndexOf(')');
+        if (start > 0 && end > start)
+        {
+            var inside = dt.Substring(start + 1, end - start - 1).Trim();
+            if (inside.Equals("max", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            if (int.TryParse(inside, out var len) && len > 0)
+                return len;
+        }
+        return null;
+    }
+}
+
+<form asp-action="Create"
+      asp-controller="Data"
+      asp-route-tableId="@Model.Table.Id"
+      method="post"
+      data-cms-ajax="true">
+
+    @Html.AntiForgeryToken()
+
+    @* PK readonly *@
+    @{
+        var pk = Model.Columns.FirstOrDefault(c => c.IsPrimary);
+        if (pk != null)
+        {
+            <div class="mb-3">
+                <label class="form-label">
+                    @((pk.DisplayName ?? pk.ColumnName) + " (PK)")
+                </label>
+                <input class="form-control" value="(auto)" readonly />
+            </div>
+        }
+    }
+
+    @* chỗ show lỗi server nếu có *@
+    @if (!ViewData.ModelState.IsValid)
+    {
+        <div class="alert alert-danger py-2">
+            Có lỗi khi lưu. Vui lòng kiểm tra lại các trường dữ liệu.
+        </div>
+    }
+
+    @foreach (var col in Model.Columns)
+    {
+        if (col.IsPrimary)
+            continue;
+
+        var label = col.DisplayName ?? col.ColumnName;
+        var name = col.ColumnName;
+        var required = IsRequired(col);
+        var maxLen = GetMaxLength(col);
+
+        if (!col.IsEditable)
+        {
+            <div class="mb-3">
+                <label class="form-label">@label (readonly)</label>
+                <input class="form-control"
+                       value="(auto / default)"
+                       readonly />
+                @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                {
+                    <div class="form-text">
+                        default_expr: <code>@col.DefaultExpr</code>
+                    </div>
+                }
+            </div>
+
+            continue;
+        }
+
+        <div class="mb-3">
+            <label class="form-label">@label</label>
+
+            @if (IsTextArea(col))
+            {
+                <textarea name="@name"
+                  class="form-control"
+                  rows="3"
+                  @(required ? "required" : "")
+                  @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "")></textarea>
+            }
+            else if (IsBoolCol(col))
+            {
+                <div class="form-check form-switch">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="field_@name"
+                           name="@name"
+                           value="1" />
+                    <label class="form-check-label" for="field_@name">
+                        Bật / tắt (@label)
+                    </label>
+                </div>
+            }
+            else if (IsImageCol(col))
+            {
+                <input name="@name"
+                       class="form-control"
+                       type="text"
+                       @(required ? "required" : "")
+                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
+                <small class="text-muted">
+                    Dán URL ảnh (CDN / UploadImages.aspx) vào đây.
+                </small>
+            }
+            else
+            {
+                var inputType = InputTypeFor(col);
+                var step = StepFor(col);
+
+                <input name="@name"
+                       class="form-control"
+                       type="@inputType"
+                       @(step != null ? $"step=\"{step}\"" : "")
+                       @(required ? "required" : "")
+                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
+            }
+
+            <div class="form-text">
+                <small>
+                    Kiểu: <code>@col.DataType</code>
+                    @if (!string.IsNullOrWhiteSpace(col.Format))
+                    {
+                        @: | Format: <code>@col.Format</code>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                    {
+                        @: | default_expr: <code>@col.DefaultExpr</code>
+                    }
+                </small>
+            </div>
+        </div>
+    }
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+</form>

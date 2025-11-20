@@ -1,17 +1,118 @@
 ﻿@model CmsTools.Models.DataListViewModel
 @using System.Globalization
 
+@section Scripts {
+    <script>
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('[data-cms-modal]');
+            if (!btn) return;
+
+            e.preventDefault();
+
+            const url = btn.getAttribute('data-url');
+            if (!url) return;
+
+            const modalEl = document.getElementById('cmsRowModal');
+            const modalBody = document.getElementById('cmsRowModalBody');
+            const modalTitleEl = document.getElementById('cmsRowModalTitle');
+
+            if (!modalEl || !modalBody) return;
+
+            const title = btn.getAttribute('data-title');
+            if (modalTitleEl && title) {
+                modalTitleEl.textContent = title;
+            }
+
+            modalBody.innerHTML =
+                '<div class="text-center text-muted small p-3">Đang tải...</div>';
+
+            fetch(url, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(r => r.text())
+                .then(html => {
+                    modalBody.innerHTML = html;
+                })
+                .catch(err => {
+                    console.error(err);
+                    modalBody.innerHTML =
+                        '<div class="text-danger p-3">Lỗi tải dữ liệu.</div>';
+                });
+
+            const bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+        });
+
+        // ===== AJAX submit cho form trong modal =====
+        document.addEventListener('submit', function (e) {
+            const form = e.target;
+            if (!form.matches('form[data-cms-ajax="true"]')) return;
+
+            // Cho browser chạy HTML5 validation
+            if (!form.checkValidity()) {
+                // Không preventDefault để browser highlight lỗi
+                return;
+            }
+
+            e.preventDefault();
+
+            const modalBody = document.getElementById('cmsRowModalBody');
+            if (modalBody) {
+                modalBody.classList.remove('cmstools-modal-error');
+            }
+
+            const action = form.getAttribute('action') || window.location.href;
+            const method = (form.getAttribute('method') || 'post').toUpperCase();
+
+            fetch(action, {
+                method: method,
+                body: new FormData(form),
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+                .then(async res => {
+                    const ct = (res.headers.get('content-type') || '').toLowerCase();
+
+                    if (res.ok && ct.includes('application/json')) {
+                        // server trả JSON { ok: true } -> reload list
+                        const data = await res.json();
+                        if (data && data.ok) {
+                            window.location.reload();
+                            return;
+                        }
+                    }
+
+                    // Còn lại coi như HTML partial (form với lỗi)
+                    const html = await res.text();
+                    if (modalBody) {
+                        modalBody.innerHTML = html;
+                        modalBody.classList.add('cmstools-modal-error');
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    if (modalBody) {
+                        modalBody.innerHTML =
+                            '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
+                        modalBody.classList.add('cmstools-modal-error');
+                    }
+                });
+        });
+    </script>
+}
+
+
+
+
 @functions {
     bool IsImageColumn(CmsTools.Models.CmsColumnMeta col)
     {
         var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
         var fmt = (col.Format ?? string.Empty).ToLowerInvariant();
 
-        // Ưu tiên: nếu format khai báo rõ là ảnh
+        // Ưu tiên format
         if (fmt == "img" || fmt == "image" || fmt.StartsWith("img:"))
             return true;
 
-        // Heuristic tên cột: main_image, image_url, thumb, avatar...
         if (name.Contains("image") ||
             name.Contains("img") ||
             name.Contains("thumb") ||
@@ -28,16 +129,12 @@
     {
         if (string.IsNullOrWhiteSpace(s)) return string.Empty;
 
-        // bỏ khoảng trắng để mask, nhưng vẫn hiển thị nguyên bản s
         var digits = new string(s.Where(char.IsDigit).ToArray());
-        if (digits.Length <= 5) return s; // quá ngắn, khỏi mask
+        if (digits.Length <= 5) return s;
 
-        // Ví dụ: 09*****123
         var first = digits.Substring(0, 2);
         var last = digits.Substring(digits.Length - 3);
         var maskedCore = new string('*', digits.Length - 5);
-
-        // ghép lại theo pattern
         return first + maskedCore + last;
     }
 
@@ -46,18 +143,14 @@
         if (string.IsNullOrWhiteSpace(s)) return string.Empty;
 
         var atIndex = s.IndexOf('@');
-        if (atIndex <= 0) return s; // không giống email
+        if (atIndex <= 0) return s;
 
         var local = s.Substring(0, atIndex);
-        var domain = s.Substring(atIndex); // gồm luôn '@'
+        var domain = s.Substring(atIndex);
 
         if (local.Length <= 1)
-        {
-            // a@domain -> giữ nguyên
             return s;
-        }
 
-        // a***@domain.com
         var firstChar = local[0];
         return firstChar + new string('*', Math.Max(3, local.Length - 1)) + domain;
     }
@@ -74,7 +167,7 @@
 
         var lower = fmt.ToLowerInvariant();
 
-        // ======== MASK PHONE / EMAIL ========
+        // ===== MASK PHONE / EMAIL =====
         if (lower.StartsWith("mask:"))
         {
             if (lower == "mask:phone")
@@ -83,13 +176,11 @@
             if (lower == "mask:email")
                 return MaskEmail(s);
 
-            // format mask khác chưa hỗ trợ -> trả về raw
             return s;
         }
 
         try
         {
-            // ======== ĐẶC BIỆT: DATE/DATETIME/TIME ========
             if (value is DateTime dt)
             {
                 if (lower == "datetime")
@@ -102,7 +193,6 @@
                     return dt.ToString("HH:mm", CultureInfo.CurrentCulture);
             }
 
-            // ======== CÁC FORMAT .NET BÌNH THƯỜNG (N0, N2, …) ========
             if (value is IFormattable f)
             {
                 return f.ToString(fmt, CultureInfo.CurrentCulture) ?? s;
@@ -112,7 +202,6 @@
         }
         catch
         {
-            // Nếu format lỗi thì fallback ra text thường
             return s;
         }
     }
@@ -127,252 +216,315 @@
     }
 }
 
-
-
-
-
 @{
     var title = Model.Table.DisplayName ?? Model.Table.TableName;
     ViewData["Title"] = title;
 }
+@{
+    var idCol = Model.Columns
+        .FirstOrDefault(c => c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase));
+    var otherCols = Model.Columns
+        .Where(c => !c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+}
 
-<h2 class="mt-3 mb-3">@title</h2>
+<div class="cmstools-page-header">
+    <div>
+        <h2 class="cmstools-page-title">@title</h2>
+        <div class="cmstools-page-subtitle">
+            <span>Table: <strong>@Model.Table.FullName</strong></span>
+            <span class="ms-3">Total rows: <strong>@Model.Total</strong></span>
+        </div>
+    </div>
 
-<p class="mb-2">
-    Table: <strong>@Model.Table.FullName</strong><br />
-    Total rows: <strong>@Model.Total</strong>
-</p>
+    <div class="cmstools-page-actions">
+        @if (Model.Permission?.CanCreate == true)
+        {
+            <button type="button"
+                    class="btn btn-success btn-sm me-2"
+                    data-cms-modal="form"
+                    data-title="Thêm bản ghi - @(Model.Table.DisplayName ?? Model.Table.TableName)"
+                    data-url="@Url.Action("CreateForm", "Data", new { tableId = Model.Table.Id })">
+                Thêm bản ghi mới
+            </button>
+        }
 
-<div class="d-flex flex-wrap align-items-center mb-3">
-    @if (Model.Permission?.CanCreate == true)
-    {
-        <a class="btn btn-success me-2 mb-2"
-           href="/Data/Create?tableId=@Model.Table.Id">
-            Thêm bản ghi mới
+        <a class="btn btn-outline-secondary btn-sm"
+           href="@($"{Url.Action("ExportCsv", "Data")}{Context.Request.QueryString}")">
+            Xuất CSV
         </a>
-    }
+    </div>
 
-    <!-- Nút export CSV: giữ nguyên query string hiện tại -->
-    <a class="btn btn-outline-secondary mb-2"
-       href="@($"{Url.Action("ExportCsv", "Data")}{Context.Request.QueryString}")">
-        Xuất CSV
-    </a>
+
 </div>
 
 @if (Model.FilterColumns != null && Model.FilterColumns.Count > 0)
 {
-    <form method="get" class="row g-2 mb-3">
-        <input type="hidden" name="tableId" value="@Model.Table.Id" />
-        <input type="hidden" name="page" value="1" />
-        <input type="hidden" name="pageSize" value="@Model.PageSize" />
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form method="get" class="row g-2 cmstools-filter-row">
+                <input type="hidden" name="tableId" value="@Model.Table.Id" />
+                <input type="hidden" name="page" value="1" />
+                <input type="hidden" name="pageSize" value="@Model.PageSize" />
 
-        @foreach (var col in Model.FilterColumns)
-        {
-            var name = col.ColumnName;
-            var label = col.DisplayName ?? col.ColumnName;
-            Model.Filters.TryGetValue(name, out var currentValue);
-
-            <div class="col-12 col-md-3">
-                <label class="form-label small">@label</label>
-                <input name="@name"
-                       class="form-control form-control-sm"
-                       value="@(currentValue ?? "")" />
-            </div>
-        }
-
-        <div class="col-12 mt-2">
-            <button type="submit" class="btn btn-primary btn-sm me-2">
-                Lọc
-            </button>
-            <a class="btn btn-outline-secondary btn-sm"
-               href="/Data/List?tableId=@Model.Table.Id">
-                Xoá lọc
-            </a>
-        </div>
-    </form>
-}
-
-<table class="table table-striped table-sm table-bordered">
-    <thead>
-        <tr>
-            @foreach (var c in Model.Columns)
-            {
-                var thStyle = BuildThStyle(c);
-                <th style="@thStyle">
-                    @(c.DisplayName ?? c.ColumnName)
-                </th>
-            }
-            <th style="width:160px;">Thao tác</th>
-        </tr>
-    </thead>
-
-    <tbody>
-        @foreach (System.Collections.Generic.IDictionary<string, object?> row in Model.Rows)
-        {
-            <tr>
-                @foreach (var c in Model.Columns)
+                @foreach (var col in Model.FilterColumns)
                 {
-                    object? cell = null;
-                    if (row != null && row.ContainsKey(c.ColumnName))
-                    {
-                        cell = row[c.ColumnName];
-                    }
+                    var name = col.ColumnName;
+                    var label = col.DisplayName ?? col.ColumnName;
+                    Model.Filters.TryGetValue(name, out var currentValue);
 
-                    // 1) Cột ảnh
-                    var isImageCol =
-                    (!string.IsNullOrEmpty(c.Format) &&
-                    c.Format.Equals("image", System.StringComparison.OrdinalIgnoreCase))
-                    || c.ColumnName.IndexOf("image", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || c.ColumnName.IndexOf("img", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || c.ColumnName.IndexOf("photo", System.StringComparison.OrdinalIgnoreCase) >= 0
-                    || c.ColumnName.IndexOf("avatar", System.StringComparison.OrdinalIgnoreCase) >= 0;
-
-                    if (isImageCol)
-                    {
-                        var url = cell?.ToString() ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(url))
-                        {
-                            <td></td>
-                        }
-                        else
-                        {
-                            <td>
-                                <a href="@url" target="_blank" rel="noopener noreferrer">
-                                    <img src="@url"
-                                         alt="img"
-                                         style="max-height:40px;max-width:80px;object-fit:contain;" />
-                                </a>
-                            </td>
-                        }
-                    }
-                    // 2) Cột status -> badge
-                    else if (string.Equals(c.ColumnName, "status", System.StringComparison.OrdinalIgnoreCase)
-                    && cell is not null)
-                    {
-                        byte statusByte;
-                        if (byte.TryParse(cell.ToString(), out statusByte))
-                        {
-                            <td>
-                                @if (statusByte == 1)
-                                {
-                                    <span class="badge bg-success">Active</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-secondary">Inactive</span>
-                                }
-                            </td>
-                        }
-                        else
-                        {
-                            <td>@RenderCell(c, cell)</td>
-                        }
-                    }
-                    // 3) Các cột còn lại
-                    else
-                    {
-                        <td>@RenderCell(c, cell)</td>
-                    }
+                    <div class="col-12 col-md-3">
+                        <label class="form-label small mb-1">@label</label>
+                        <input name="@name"
+                               class="form-control form-control-sm"
+                               value="@(currentValue ?? "")" />
+                    </div>
                 }
 
-                <td>
-                    @{
+                <div class="col-12 mt-1">
+                    <button type="submit" class="btn btn-primary btn-sm me-2">
+                        Lọc
+                    </button>
+                    <a class="btn btn-outline-secondary btn-sm"
+                       href="/Data/List?tableId=@Model.Table.Id">
+                        Xoá lọc
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@if (Model.Rows == null || !Model.Rows.Any())
+{
+    <p class="text-muted">Không có dữ liệu.</p>
+}
+else
+{
+    <div class="cmstools-table-container">
+        <div class="cmstools-table-scroll">
+            <table class="table table-striped table-sm table-bordered cmstools-table mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="cmstools-th cmstools-th-actions text-nowrap" style="min-width:180px;">
+                            Thao tác
+                        </th>
+
+                        @* Cột ID nếu có *@
+                        @if (idCol != null)
+                        {
+                            <th class="cmstools-th text-nowrap" style="width:80px;">
+                                @(idCol.DisplayName ?? idCol.ColumnName)
+                            </th>
+                        }
+
+                        @* Các cột còn lại *@
+                        @foreach (var c in otherCols)
+                        {
+                            var thStyle = BuildThStyle(c);
+                            <th class="cmstools-th text-nowrap" style="@thStyle">
+                                @(c.DisplayName ?? c.ColumnName)
+                            </th>
+                        }
+                    </tr>
+                </thead>
+
+
+
+                <tbody>
+                    @foreach (System.Collections.Generic.IDictionary<string, object?> row in Model.Rows)
+                    {
+                        // Lấy idValue một lần để dùng cho cả action + cột ID
                         object? idValue = null;
                         if (row != null && row.ContainsKey("id"))
                         {
                             idValue = row["id"];
                         }
-                    }
 
-                    @* nút Sửa / Xem tuỳ quyền *@
-                    @if (idValue != null)
-                    {
-                        if (Model.Permission?.CanUpdate == true)
-                        {
-                            <a class="btn btn-sm btn-primary me-1"
-                               href="/Data/Edit?tableId=@Model.Table.Id&id=@idValue">
-                                Sửa
-                            </a>
-                        }
-                        else if (Model.Permission?.CanView == true)
-                        {
-                            <a class="btn btn-sm btn-outline-secondary me-1"
-                               href="/Data/Details?tableId=@Model.Table.Id&id=@idValue">
-                                Xem
-                            </a>
-                        }
+                        <tr>
+                            @* ==== CỘT THAO TÁC (ĐẦU TIÊN) ==== *@
+                            <td class="cmstools-td cmstools-td-actions text-nowrap">
+                                @if (idValue != null)
+                                {
+                                    @if (Model.Permission?.CanUpdate == true)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-primary me-1"
+                                                data-cms-modal="form"
+                                                data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                                data-url="@Url.Action("EditForm", "Data",
+                                                                                          new { tableId = Model.Table.Id, id = idValue })">
+                            Sửa
+                        </button>
+                                                }
+                                    else if (Model.Permission?.CanView == true)
+                                    {
+                                        <a class="btn btn-sm btn-outline-secondary me-1"
+                                           href="/Data/Details?tableId=@Model.Table.Id&id=@idValue">
+                                            Xem
+                                        </a>
+                                    }
 
-                        @* 👉 Nút custom detail theo meta, dùng chung cho mọi bảng *@
-                        if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
-                        {
-                            var idStr = idValue.ToString();
-                            var url = Model.Table.CustomDetailUrl
-                            .Replace("{id}", idStr)   // pattern chính
-                            .Replace("{pk}", idStr);  // optional, nếu sau này muốn dùng {pk}
+                                    @* Link chi tiết custom (nếu có) *@
+                                    if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                    {
+                                        var idStr = idValue.ToString();
+                                        var url = Model.Table.CustomDetailUrl
+                                        .Replace("{id}", idStr)
+                                        .Replace("{pk}", idStr);
 
-                            <a class="btn btn-sm btn-outline-secondary me-1"
-                               href="@url">
-                                Chi tiết
-                            </a>
-                        }
-                    }
+                                        <a class="btn btn-sm btn-outline-secondary me-1"
+                                           href="@url">
+                                            Chi tiết
+                                        </a>
+                                    }
 
-                    @if (idValue != null
-                                    && Model.Permission != null
-                                    && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
-                                    && Model.Columns.Any(x => x.ColumnName.Equals("status", System.StringComparison.OrdinalIgnoreCase)))
-                    {
-                        object? statusObj = null;
-                        if (row != null && row.ContainsKey("status"))
-                        {
-                            statusObj = row["status"];
-                        }
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-secondary me-1"
+                                            data-cms-modal="row"
+                                            data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                            data-url="@Url.Action("DetailsModal", "Data",
+                                                                                  new { tableId = Model.Table.Id, id = idValue })">
+                            Xem nhanh
+                        </button>
+                                                }
 
-                        byte statusByte = 0;
-                        byte.TryParse(statusObj?.ToString(), out statusByte);
+                                @* Nút Ẩn / Kích hoạt nếu có status *@
+                                @if (idValue != null
+                                                        && Model.Permission != null
+                                                        && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
+                                                        && Model.Columns.Any(x => x.ColumnName.Equals("status", System.StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    object? statusObj = null;
+                                    if (row != null && row.ContainsKey("status"))
+                                    {
+                                        statusObj = row["status"];
+                                    }
 
-                        <form method="post"
-                              asp-controller="Data"
-                              asp-action="SetStatus"
-                              asp-route-tableId="@Model.Table.Id"
-                              asp-route-id="@idValue"
-                              class="d-inline">
-                            @Html.AntiForgeryToken()
+                                    byte statusByte = 0;
+                                    byte.TryParse(statusObj?.ToString(), out statusByte);
 
-                            @if (statusByte == 1)
+                                    <form method="post"
+                                          asp-controller="Data"
+                                          asp-action="SetStatus"
+                                          asp-route-tableId="@Model.Table.Id"
+                                          asp-route-id="@idValue"
+                                          class="d-inline">
+                                        @Html.AntiForgeryToken()
+
+                                        @if (statusByte == 1)
+                                        {
+                                            <input type="hidden" name="status" value="0" />
+                                            <button type="submit" class="btn btn-sm btn-warning">
+                                                Ẩn
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <input type="hidden" name="status" value="1" />
+                                            <button type="submit" class="btn btn-sm btn-success">
+                                                Kích hoạt
+                                            </button>
+                                        }
+                                    </form>
+                                }
+                            </td>
+
+                            @* ==== CỘT ID (THỨ HAI) NẾU CÓ ==== *@
+                            @if (idCol != null)
                             {
-                                <input type="hidden" name="status" value="0" />
-                                <button type="submit" class="btn btn-sm btn-warning">
-                                    Ẩn
-                                </button>
+                                object? cellId = null;
+                                if (row != null && row.ContainsKey(idCol.ColumnName))
+                                {
+                                    cellId = row[idCol.ColumnName];
+                                }
+
+                                <td class="cmstools-td text-nowrap">
+                                    @RenderCell(idCol, cellId)
+                                </td>
                             }
-                            else
+
+                            @* ==== CÁC CỘT DỮ LIỆU CÒN LẠI ==== *@
+                            @foreach (var c in otherCols)
                             {
-                                <input type="hidden" name="status" value="1" />
-                                <button type="submit" class="btn btn-sm btn-success">
-                                    Kích hoạt
-                                </button>
+                                object? cell = null;
+                                if (row != null && row.ContainsKey(c.ColumnName))
+                                {
+                                    cell = row[c.ColumnName];
+                                }
+
+                                var isImageCol = IsImageColumn(c);
+
+                                if (isImageCol)
+                                {
+                                    var url = cell?.ToString() ?? string.Empty;
+                                    if (string.IsNullOrWhiteSpace(url))
+                                    {
+                                        <td class="cmstools-td"></td>
+                                    }
+                                    else
+                                    {
+                                        <td class="cmstools-td">
+                                            <a href="@url" target="_blank" rel="noopener noreferrer">
+                                                <img src="@url"
+                                                     alt="img"
+                                                     class="cmstools-img-thumb" />
+                                            </a>
+                                        </td>
+                                    }
+                                }
+                                else if (string.Equals(c.ColumnName, "status", System.StringComparison.OrdinalIgnoreCase)
+                                && cell is not null)
+                                {
+                                    byte statusByte;
+                                    if (byte.TryParse(cell.ToString(), out statusByte))
+                                    {
+                                        <td class="cmstools-td">
+                                            @if (statusByte == 1)
+                                            {
+                                                <span class="badge bg-success">Active</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-secondary">Inactive</span>
+                                            }
+                                        </td>
+                                    }
+                                    else
+                                    {
+                                        <td class="cmstools-td">@RenderCell(c, cell)</td>
+                                    }
+                                }
+                                else
+                                {
+                                    <td class="cmstools-td">@RenderCell(c, cell)</td>
+                                }
                             }
-                        </form>
+                        </tr>
                     }
-                </td>
+                </tbody>
 
-            </tr>
-        }
 
-    </tbody>
-</table>
+            </table>
+        </div>
+    </div>
+}
 
 @if (Model.TotalPages > 1)
 {
     <nav class="mt-3">
-        <ul class="pagination pagination-sm">
+        <ul class="pagination pagination-sm flex-wrap">
             @for (int i = 1; i <= Model.TotalPages; i++)
             {
                 var active = (i == Model.Page);
                 <li class="page-item @(active ? "active" : "")">
                     <a class="page-link"
-                       href="/Data/List?tableId=@Model.Table.Id&page=@i&pageSize=@Model.PageSize">
+                       asp-controller="Data"
+                       asp-action="List"
+                       asp-route-tableId="@Model.Table.Id"
+                       asp-route-page="@i"
+                       asp-route-pageSize="@Model.PageSize"
+                       asp-all-route-data="Model.Filters">
                         @i
                     </a>
                 </li>
@@ -380,3 +532,31 @@
         </ul>
     </nav>
 }
+
+<!-- Modal xem nhanh 1 bản ghi (luôn luôn render) -->
+<div class="modal fade" id="cmsRowModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title" id="cmsRowModalTitle">
+                    Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName)
+                </h5>
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="cmsRowModalBody">
+                <div class="text-center text-muted small p-3">
+                    Đang tải...
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        data-bs-dismiss="modal">
+                    Đóng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+

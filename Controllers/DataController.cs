@@ -422,16 +422,30 @@ namespace CmsTools.Controllers
             }
 
             var affected = await _router.UpdateRowAsync(
-                connMeta,
-                table,
-                editableCols,
-                pkCol,
-                id,
-                values);
+     connMeta,
+     table,
+     editableCols,
+     pkCol,
+     id,
+     values);
 
             if (affected <= 0)
             {
-                return BadRequest("Update failed.");
+                var vm = new DataEditViewModel
+                {
+                    Table = table,
+                    Columns = cols,
+                    Values = oldRow ?? new Dictionary<string, object?>(),
+                    PrimaryKeyColumn = pkCol,
+                    PrimaryKeyValue = id
+                };
+
+                ModelState.AddModelError(string.Empty, "Update failed.");
+
+                if (IsAjaxRequest())
+                    return PartialView("_EditForm", vm);
+
+                return View(vm);
             }
 
             // ==== ghi log audit ====
@@ -444,14 +458,19 @@ namespace CmsTools.Controllers
                 oldSnapshot,
                 newSnapshot);
 
-            // sau khi lưu xong quay lại List
+            // AJAX -> JSON ok, normal -> redirect
+            if (IsAjaxRequest())
+            {
+                return Json(new { ok = true });
+            }
+
             return RedirectToAction("List", new { tableId });
         }
 
 
-        // ========== CREATE (GET) ==========
+            // ========== CREATE (GET) ==========
 
-        [HttpGet]
+            [HttpGet]
         public async Task<IActionResult> Create(int tableId)
         {
             var table = await _meta.GetTableAsync(tableId);
@@ -558,10 +577,22 @@ namespace CmsTools.Controllers
             }
 
             // Gọi Insert với danh sách cột cuối cùng (form + default_expr)
+            // Gọi Insert...
             var newId = await _router.InsertRowAsync(connMeta, table, finalCols, values);
             if (newId <= 0)
             {
-                return BadRequest("Insert failed.");
+                // build viewmodel để show lại form
+                var vm = new DataCreateViewModel
+                {
+                    Table = table,
+                    Columns = cols
+                };
+                ModelState.AddModelError(string.Empty, "Insert failed.");
+
+                if (IsAjaxRequest())
+                    return PartialView("_CreateForm", vm);
+
+                return View(vm);
             }
 
             // ==== build newRow để audit ====
@@ -579,9 +610,15 @@ namespace CmsTools.Controllers
                 table,
                 pkCol,
                 newId,
-                null,        // oldValues
-                newSnapshot  // newValues
+                null,
+                newSnapshot
             );
+
+            // ✅ Trả JSON nếu request là AJAX, để JS biết reload
+            if (IsAjaxRequest())
+            {
+                return Json(new { ok = true });
+            }
 
             return RedirectToAction("List", new { tableId });
         }
@@ -729,6 +766,150 @@ namespace CmsTools.Controllers
 
             return View(vm); // Views/Data/Details.cshtml
         }
+        [HttpGet]
+        public async Task<IActionResult> DetailsModal(int tableId, long id)
+        {
+            var table = await _meta.GetTableAsync(tableId);
+            if (table == null)
+                return NotFound("Table metadata not found or disabled.");
+
+            var userId = GetCurrentCmsUserId();
+            if (userId == null)
+                return Unauthorized();
+
+            var perm = await _perms.GetTablePermissionAsync(userId.Value, tableId);
+            if (!perm.CanView)
+                return Forbid();
+
+            var cols = await _meta.GetColumnsAsync(tableId, forList: false);
+            if (!cols.Any())
+                return BadRequest("No columns configured.");
+
+            var connMeta = await _meta.GetConnectionAsync(table.ConnectionId);
+            if (connMeta == null || !connMeta.IsActive)
+                return BadRequest("Connection not available.");
+
+            var pkCol = ResolvePrimaryKey(table, cols);
+            if (string.IsNullOrWhiteSpace(pkCol))
+                return BadRequest("Primary key not configured.");
+
+            var row = await _router.GetRowAsync(connMeta, table, cols, pkCol, id);
+            if (row == null)
+                return NotFound("Row not found.");
+
+            var vm = new DataEditViewModel
+            {
+                Table = table,
+                Columns = cols,
+                Values = row,
+                PrimaryKeyColumn = pkCol,
+                PrimaryKeyValue = id
+            };
+
+            // Trả về partial (không layout) để nhét vào modal
+            return PartialView("_DetailsModal", vm);
+        }
+        // ========== CREATE FORM (AJAX) ==========
+
+        [HttpGet]
+        public async Task<IActionResult> CreateForm(int tableId)
+        {
+            var table = await _meta.GetTableAsync(tableId);
+            if (table == null)
+                return NotFound("Table metadata not found or disabled.");
+
+            var userId = GetCurrentCmsUserId();
+            if (userId == null)
+                return Unauthorized();
+
+            var perm = await _perms.GetTablePermissionAsync(userId.Value, tableId);
+            if (!perm.CanCreate)
+                return Forbid();
+
+            var cols = await _meta.GetColumnsAsync(tableId, forList: false);
+            if (!cols.Any())
+                return BadRequest("No columns configured.");
+
+            var connMeta = await _meta.GetConnectionAsync(table.ConnectionId);
+            if (connMeta == null || !connMeta.IsActive)
+                return BadRequest("Connection not available.");
+
+            var vm = new DataCreateViewModel
+            {
+                Table = table,
+                Columns = cols
+            };
+
+            // Nếu là AJAX -> trả partial
+            if (string.Equals(Request.Headers["X-Requested-With"], "XMLHttpRequest",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return PartialView("_CreateForm", vm);  // Views/Data/_CreateForm.cshtml
+            }
+
+            // Fallback: load view Create full page
+            return View("Create", vm);
+        }
+
+
+        // ========== EDIT FORM (AJAX) ==========
+
+        [HttpGet]
+        public async Task<IActionResult> EditForm(int tableId, long id)
+        {
+            var table = await _meta.GetTableAsync(tableId);
+            if (table == null)
+                return NotFound("Table metadata not found or disabled.");
+
+            var userId = GetCurrentCmsUserId();
+            if (userId == null)
+                return Unauthorized();
+
+            var perm = await _perms.GetTablePermissionAsync(userId.Value, tableId);
+            if (!perm.CanUpdate && !perm.CanView)
+                return Forbid();
+
+            var cols = await _meta.GetColumnsAsync(tableId, forList: false);
+            if (!cols.Any())
+                return BadRequest("No columns configured.");
+
+            var connMeta = await _meta.GetConnectionAsync(table.ConnectionId);
+            if (connMeta == null || !connMeta.IsActive)
+                return BadRequest("Connection not available.");
+
+            var pkCol = ResolvePrimaryKey(table, cols);
+            if (string.IsNullOrWhiteSpace(pkCol))
+                return BadRequest("Primary key not configured.");
+
+            var row = await _router.GetRowAsync(
+                connMeta,
+                table,
+                cols,
+                pkCol,
+                id);
+
+            if (row == null)
+                return NotFound("Row not found.");
+
+            var vm = new DataEditViewModel
+            {
+                Table = table,
+                Columns = cols,
+                Values = row,
+                PrimaryKeyColumn = pkCol,
+                PrimaryKeyValue = id
+            };
+
+            // AJAX -> partial
+            if (string.Equals(Request.Headers["X-Requested-With"], "XMLHttpRequest",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return PartialView("_EditForm", vm);  // Views/Data/_EditForm.cshtml
+            }
+
+            // Fallback: view Edit full page
+            return View("Edit", vm);
+        }
 
 
         // ========== Helper ==========
@@ -855,5 +1036,13 @@ namespace CmsTools.Controllers
             // Có thể mở rộng thêm các kiểu khác sau này
             return null;
         }
+
+        private bool IsAjaxRequest()
+        {
+            if (Request?.Headers == null) return false;
+            var h = Request.Headers["X-Requested-With"].ToString();
+            return h.Equals("XMLHttpRequest", StringComparison.OrdinalIgnoreCase);
+        }
+
     }
 }

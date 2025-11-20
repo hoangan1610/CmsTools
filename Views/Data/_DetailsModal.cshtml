@@ -1,0 +1,117 @@
+﻿@model CmsTools.Models.DataEditViewModel
+@using CmsTools.Models
+@using System.Globalization
+
+@functions {
+    string RenderVal(CmsColumnMeta col, object? value)
+    {
+        if (value == null || value is DBNull) return string.Empty;
+        var s = value.ToString() ?? string.Empty;
+
+        var fmt = (col.Format ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(fmt))
+            return s;
+
+        try
+        {
+            if (value is DateTime dt)
+            {
+                if (fmt == "datetime")
+                    return dt.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture);
+                if (fmt == "date")
+                    return dt.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture);
+                if (fmt == "time")
+                    return dt.ToString("HH:mm", CultureInfo.CurrentCulture);
+            }
+
+            if (value is IFormattable f)
+                return f.ToString(fmt, CultureInfo.CurrentCulture) ?? s;
+
+            return s;
+        }
+        catch { return s; }
+    }
+
+    bool IsImageCol(CmsColumnMeta col)
+    {
+        var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
+        var fmt = (col.Format ?? string.Empty).ToLowerInvariant();
+
+        if (fmt == "img" || fmt == "image" || fmt.StartsWith("img:"))
+            return true;
+
+        if (name.Contains("image") || name.Contains("img") ||
+            name.Contains("thumb") || name.Contains("avatar") || name.Contains("photo"))
+            return true;
+
+        return false;
+    }
+}
+
+<div class="small text-muted mb-2">
+    Bảng: <code>@Model.Table.FullName</code><br />
+    Khóa: <strong>@Model.PrimaryKeyColumn = @Model.PrimaryKeyValue</strong>
+</div>
+
+<div class="row g-2">
+    @foreach (var col in Model.Columns)
+    {
+        object? value = null;
+        if (Model.Values != null && Model.Values.ContainsKey(col.ColumnName))
+        {
+            value = Model.Values[col.ColumnName];
+        }
+
+        var label = col.DisplayName ?? col.ColumnName;
+        var isImg = IsImageCol(col);
+
+        <div class="col-12">
+            <div class="border rounded px-2 py-1 bg-light-subtle">
+                <div class="small text-muted mb-1">
+                    @label
+                </div>
+
+                @if (isImg)
+                {
+                    var url = value?.ToString() ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        <a href="@url" target="_blank" rel="noopener noreferrer">
+                            <img src="@url"
+                                 alt="img"
+                                 class="border rounded"
+                                 style="max-height:120px;max-width:100%;object-fit:contain;" />
+                        </a>
+                    }
+                    else
+                    {
+                        <div class="text-muted small">(no image)</div>
+                    }
+                }
+                else if (string.Equals(col.ColumnName, "status", StringComparison.OrdinalIgnoreCase) && value != null)
+                {
+                    byte status;
+                    if (byte.TryParse(value.ToString(), out status))
+                    {
+                        if (status == 1)
+                        {
+                            <span class="badge bg-success">Active</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Inactive</span>
+                        }
+                    }
+                    else
+                    {
+                        <div>@RenderVal(col, value)</div>
+                    }
+                }
+                else
+                {
+                    <div>@RenderVal(col, value)</div>
+                }
+            </div>
+        </div>
+    }
+</div>
