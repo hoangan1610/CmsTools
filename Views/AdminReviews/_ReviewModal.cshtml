@@ -1,0 +1,105 @@
+﻿@model CmsTools.Models.AdminReviewViewModel
+
+<div class="modal-header">
+    <h5 class="modal-title">
+        Đánh giá #@Model.Id – @Model.Product_Name
+    </h5>
+
+    <a href="@($"/Product/Product.aspx?id={Model.Product_Id}")"
+       target="_blank"
+       class="btn btn-sm btn-outline-primary me-2">
+        Xem trên HAFood
+    </a>
+
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+</div>
+
+<div class="modal-body">
+    <div class="mb-2 small text-muted">
+        Khách: <strong>@Model.User_Name</strong><br />
+        Đặt lúc: @Model.Created_At.ToString("dd/MM/yyyy HH:mm")
+    </div>
+
+    <div class="mb-2">
+        <strong>Điểm:</strong>
+        @for (var i = 1; i <= 5; i++)
+        {
+            if (i <= Model.Rating)
+            {
+                @:<i class="bi bi-star-fill text-warning"></i>
+            }
+            else
+            {
+                @:<i class="bi bi-star text-secondary"></i>
+            }
+        }
+    </div>
+
+    <div class="mb-2">
+        <strong>Tiêu đề:</strong> @Model.Title
+    </div>
+
+    <div class="mb-3">
+        <strong>Nội dung:</strong>
+        <div class="border rounded p-2" style="white-space:pre-wrap;font-size:.9rem;">
+            @Model.Content
+        </div>
+    </div>
+
+    <div class="mb-2">
+        <span class="badge @(Model.Is_Verified_Purchase ? "bg-success" : "bg-secondary")">
+            @(Model.Is_Verified_Purchase ? "Đã mua hàng" : "Chưa xác minh mua hàng")
+        </span>
+        @if (Model.Has_Image)
+        {
+            <span class="badge bg-info ms-1">Có hình ảnh</span>
+        }
+    </div>
+
+    <div class="mb-3">
+        <strong>Trạng thái hiện tại:</strong>
+        @{
+            string statusText = "Chờ duyệt";
+            string statusClass = "badge bg-warning text-dark";
+            if (Model.Status == 1) { statusText = "Đã duyệt"; statusClass = "badge bg-success"; }
+            else if (Model.Status == 2) { statusText = "Đã từ chối"; statusClass = "badge bg-danger"; }
+        }
+        <span class="@statusClass">@statusText</span>
+    </div>
+
+    @* Form dùng cơ chế AJAX chung của DataList *@
+    @using (Html.BeginForm("SetStatus", "AdminReviews", FormMethod.Post,
+        new { id = "frmReviewStatus", data_cms_ajax = "true" }))
+    {
+        @Html.AntiForgeryToken()
+        @Html.Hidden("id", Model.Id)
+
+        <div class="mb-2">
+            <label class="form-label">Lý do từ chối (nếu có)</label>
+            <textarea name="rejectedReason"
+                  class="form-control form-control-sm"
+                  rows="2"
+                  placeholder="Ví dụ: Nội dung không phù hợp, sai sự thật..."></textarea>
+        </div>
+
+        <div class="modal-footer">
+            <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">
+                Đóng
+            </button>
+
+            <!-- 2 = rejected -->
+            <button type="submit"
+                    class="btn btn-danger btn-sm"
+                    name="newStatus" value="2">
+                Từ chối
+            </button>
+
+            <!-- 1 = approved -->
+            <button type="submit"
+                    class="btn btn-success btn-sm"
+                    name="newStatus" value="1">
+                Duyệt
+            </button>
+        </div>
+    }
+</div>

@@ -46,7 +46,7 @@
         // ===== AJAX submit cho form trong modal =====
         document.addEventListener('submit', function (e) {
             const form = e.target;
-            if (!form.matches('form[data-cms-ajax="true"]')) return;
+            if (!form.matches('form[data-cms-ajax="true"], form[data_cms_ajax="true"]')) return;
 
             // Cho browser chạy HTML5 validation
             if (!form.checkValidity()) {
@@ -61,42 +61,62 @@
                 modalBody.classList.remove('cmstools-modal-error');
             }
 
-            const action = form.getAttribute('action') || window.location.href;
-            const method = (form.getAttribute('method') || 'post').toUpperCase();
+                   const action = form.getAttribute('action') || window.location.href;
+        const method = (form.getAttribute('method') || 'post').toUpperCase();
 
-            fetch(action, {
-                method: method,
-                body: new FormData(form),
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        // Tạo FormData từ form
+        const fd = new FormData(form);
+
+        // 👇 THÊM: gắn thêm nút submit đã bấm (newStatus, v.v.)
+        const submitter = e.submitter;   // Chrome, Edge, Firefox mới đều hỗ trợ
+        if (submitter && submitter.name) {
+            fd.append(submitter.name, submitter.value);
+        }
+
+        fetch(action, {
+            method: method,
+            body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+            .then(async res => {
+                const ct = (res.headers.get('content-type') || '').toLowerCase();
+
+                if (ct.includes('application/json')) {
+                    const data = await res.json().catch(() => null);
+
+                    if (data && data.ok) {
+                        window.location.reload();
+                        return;
+                    }
+
+                    if (data && data.message) {
+                        alert(data.message);
+                    } else {
+                        alert('Có lỗi khi cập nhật, nhưng server không trả message.');
+                    }
+                    return;
+                }
+
+                const html = await res.text();
+                if (modalBody) {
+                    modalBody.innerHTML = html;
+                    modalBody.classList.add('cmstools-modal-error');
+                }
             })
-                .then(async res => {
-                    const ct = (res.headers.get('content-type') || '').toLowerCase();
+            .catch(err => {
+                console.error(err);
+                if (modalBody) {
+                    modalBody.innerHTML =
+                        '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
+                    modalBody.classList.add('cmstools-modal-error');
+                }
+            });
 
-                    if (res.ok && ct.includes('application/json')) {
-                        // server trả JSON { ok: true } -> reload list
-                        const data = await res.json();
-                        if (data && data.ok) {
-                            window.location.reload();
-                            return;
-                        }
-                    }
 
-                    // Còn lại coi như HTML partial (form với lỗi)
-                    const html = await res.text();
-                    if (modalBody) {
-                        modalBody.innerHTML = html;
-                        modalBody.classList.add('cmstools-modal-error');
-                    }
-                })
-                .catch(err => {
-                    console.error(err);
-                    if (modalBody) {
-                        modalBody.innerHTML =
-                            '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
-                        modalBody.classList.add('cmstools-modal-error');
-                    }
-                });
         });
+
+
+                
     </script>
 }
 
@@ -178,6 +198,23 @@
 
             return s;
         }
+
+        // 🔹 Format riêng cho status của review
+        if (lower == "reviewstatus")
+        {
+            if (byte.TryParse(s, out var b))
+            {
+                return b switch
+                {
+                    0 => "Chờ duyệt",
+                    1 => "Đã duyệt",
+                    2 => "Đã từ chối",
+                    _ => b.ToString()
+                };
+            }
+            return s;
+        }
+
 
         try
         {
@@ -387,13 +424,32 @@ else
                                                                                   new { tableId = Model.Table.Id, id = idValue })">
                             Xem nhanh
                         </button>
+
+                                    @* 👉 NÚT DUYỆT REVIEW – chỉ hiện cho bảng tbl_product_review *@
+                        @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
+                                                && Model.Permission?.CanUpdate == true)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-primary me-1"
+                                                data-cms-modal="row"
+                                                data-title="Duyệt đánh giá #@idValue"
+                                                data-url="@Url.Action("Modal", "AdminReviews", new { id = idValue })">
+                                            Duyệt
+                                        </button>
+                                    }
                                                 }
 
+
+                               
+                                
+
                                 @* Nút Ẩn / Kích hoạt nếu có status *@
+
                                 @if (idValue != null
                                                         && Model.Permission != null
                                                         && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
-                                                        && Model.Columns.Any(x => x.ColumnName.Equals("status", System.StringComparison.OrdinalIgnoreCase)))
+                                                        && Model.Columns.Any(x => x.ColumnName.Equals("status", System.StringComparison.OrdinalIgnoreCase))
+                                                        && !Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase))   @* 🔹 thêm điều kiện này *@
                                 {
                                     object? statusObj = null;
                                     if (row != null && row.ContainsKey("status"))
@@ -428,6 +484,9 @@ else
                                         }
                                     </form>
                                 }
+
+
+                                
                             </td>
 
                             @* ==== CỘT ID (THỨ HAI) NẾU CÓ ==== *@
@@ -480,13 +539,38 @@ else
                                     if (byte.TryParse(cell.ToString(), out statusByte))
                                     {
                                         <td class="cmstools-td">
-                                            @if (statusByte == 1)
+                                            @* 🔹 Nếu là bảng review hoặc format = reviewStatus thì dùng 3 trạng thái *@
+                                            @if (Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase)
+                                                                    || string.Equals(c.Format, "reviewStatus", StringComparison.OrdinalIgnoreCase))
                                             {
-                                                <span class="badge bg-success">Active</span>
+                                                if (statusByte == 0)
+                                                {
+                                                    <span class="badge bg-warning text-dark">Chờ duyệt</span>
+                                                }
+                                                else if (statusByte == 1)
+                                                {
+                                                    <span class="badge bg-success">Đã duyệt</span>
+                                                }
+                                                else if (statusByte == 2)
+                                                {
+                                                    <span class="badge bg-danger">Đã từ chối</span>
+                                                }
+                                                else
+                                                {
+                                                    @statusByte.ToString()
+                                                }
                                             }
                                             else
                                             {
-                                                <span class="badge bg-secondary">Inactive</span>
+                                                @* Mặc định cho bảng khác: Active / Inactive *@
+                                                if (statusByte == 1)
+                                                {
+                                                    <span class="badge bg-success">Active</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary">Inactive</span>
+                                                }
                                             }
                                         </td>
                                     }
@@ -495,6 +579,7 @@ else
                                         <td class="cmstools-td">@RenderCell(c, cell)</td>
                                     }
                                 }
+
                                 else
                                 {
                                     <td class="cmstools-td">@RenderCell(c, cell)</td>
