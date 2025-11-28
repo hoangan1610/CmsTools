@@ -1,9 +1,44 @@
 ﻿@model CmsTools.Models.CmsOrderDetailViewModel
 @using System.Globalization
 
+@functions {
+    string RenderOrderStatus(byte status)
+    {
+        return status switch
+        {
+            0 => "Mới tạo",
+            1 => "Đã xác nhận",
+            2 => "Đang giao",
+            3 => "Đã giao",
+            4 => "Đã huỷ",
+            _ => "Không rõ"
+        };
+    }
+
+    string OrderStatusBadgeClass(byte status)
+    {
+        return status switch
+        {
+            0 => "badge bg-secondary",  // Mới tạo
+            1 => "badge bg-info",       // Đã xác nhận
+            2 => "badge bg-primary",    // Đang giao
+            3 => "badge bg-success",    // Đã giao
+            4 => "badge bg-danger",     // Đã huỷ
+            _ => "badge bg-secondary"
+        };
+    }
+
+    string Money(decimal value, CultureInfo vi)
+    {
+        return value.ToString("N0", vi) + " đ";
+    }
+}
+
 @{
     ViewData["Title"] = "Đơn hàng " + Model.OrderCode;
     var vi = CultureInfo.GetCultureInfo("vi-VN");
+    var statusText = RenderOrderStatus(Model.Status);
+    var statusClass = OrderStatusBadgeClass(Model.Status);
 }
 
 <h2 class="mt-3 mb-3">
@@ -65,14 +100,14 @@
                 Thanh toán & trạng thái
             </div>
             <div class="card-body">
-                <p>
+                <p class="mb-2">
                     <strong>Trạng thái đơn:</strong>
-                    <span class="badge bg-secondary">@Model.Status</span>
-                    @* sau này bạn map status -> text nếu muốn *@
+                    <span class="@statusClass">@statusText (@Model.Status)</span>
                 </p>
-                <p><strong>Payment status:</strong> @(Model.PaymentStatus ?? "-")</p>
-                <p><strong>Provider:</strong> @(Model.PaymentProvider ?? "-")</p>
-                <p><strong>Payment ref:</strong> @(Model.PaymentRef ?? "-")</p>
+
+                <p class="mb-1"><strong>Payment status:</strong> @(Model.PaymentStatus ?? "-")</p>
+                <p class="mb-1"><strong>Provider:</strong> @(Model.PaymentProvider ?? "-")</p>
+                <p class="mb-1"><strong>Payment ref:</strong> @(Model.PaymentRef ?? "-")</p>
 
                 <hr />
                 <p class="mb-1"><strong>Đặt lúc:</strong> @(Model.PlacedAt?.ToString("dd/MM/yyyy HH:mm") ?? "-")</p>
@@ -82,11 +117,85 @@
                 <p class="mb-1"><strong>Cancelled:</strong> @(Model.CanceledAt?.ToString("dd/MM/yyyy HH:mm") ?? "-")</p>
 
                 <hr />
-                <p class="mb-1"><strong>Tạm tính:</strong> @Model.SubTotal.ToString("N0", vi) đ</p>
-                <p class="mb-1"><strong>Giảm giá:</strong> @Model.DiscountTotal.ToString("N0", vi) đ</p>
-                <p class="mb-1"><strong>Phí ship:</strong> @Model.ShippingTotal.ToString("N0", vi) đ</p>
-                <p class="mb-1"><strong>VAT:</strong> @Model.VatTotal.ToString("N0", vi) đ</p>
-                <p class="fw-bold"><strong>Thanh toán:</strong> @Model.PayTotal.ToString("N0", vi) đ</p>
+                <p class="mb-1"><strong>Tạm tính:</strong> @Money(Model.SubTotal, vi)</p>
+                <p class="mb-1"><strong>Giảm giá:</strong> @Money(Model.DiscountTotal, vi)</p>
+                <p class="mb-1"><strong>Phí ship:</strong> @Money(Model.ShippingTotal, vi)</p>
+                <p class="mb-1"><strong>VAT:</strong> @Money(Model.VatTotal, vi)</p>
+                <p class="fw-bold mb-2"><strong>Thanh toán:</strong> @Money(Model.PayTotal, vi)</p>
+
+                <hr />
+                <h6 class="mb-2">Cập nhật trạng thái đơn</h6>
+
+                @using (Html.BeginForm(
+                                "ChangeStatus",
+                                "Orders",
+                                FormMethod.Post,
+                                new { id = "frmOrderStatus", data_cms_ajax = "true", onsubmit = "return cmsOrderStatusSubmit(this);" }))
+                {
+                    @Html.AntiForgeryToken()
+                    @Html.Hidden("id", Model.Id)
+
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small">Trạng thái mới</label>
+                            <select name="newStatus" class="form-select form-select-sm">
+                                @* Giới hạn option theo trạng thái hiện tại *@
+                                @if (Model.Status == 0)
+                                {  @* Mới tạo *@
+                                    <option value="0" selected>Giữ nguyên - Mới tạo</option>
+                                    <option value="1">Xác nhận đơn</option>
+                                    <option value="4">Huỷ đơn</option>
+                                }
+                                else if (Model.Status == 1)
+                                {
+          @* Đã xác nhận *@
+                                    <option value="1" selected>Giữ nguyên - Đã xác nhận</option>
+                                    <option value="2">Đang giao</option>
+                                    <option value="4">Huỷ đơn</option>
+                                }
+                                else if (Model.Status == 2)
+                                {
+          @* Đang giao *@
+                                    <option value="2" selected>Giữ nguyên - Đang giao</option>
+                                    <option value="3">Đã giao</option>
+                                }
+                                else if (Model.Status == 3)
+                                {
+          @* Đã giao *@
+                                    <option value="3" selected>Đã giao (không đổi)</option>
+                                }
+                                else if (Model.Status == 4)
+                                {
+          @* Đã huỷ *@
+                                    <option value="4" selected>Đã huỷ (không đổi)</option>
+                                }
+                                else
+                                {
+                                    <option value="@Model.Status" selected>Giữ nguyên (@Model.Status)</option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="col-md-8">
+                            <label class="form-label small">
+                                Ghi chú nội bộ / lý do huỷ
+                            </label>
+                            <textarea name="note"
+                                  class="form-control form-control-sm"
+                                  rows="2"
+                                  placeholder="Ví dụ: KH yêu cầu huỷ, địa chỉ không liên hệ được, ..."></textarea>
+                            <div class="form-text">
+                                Nên nhập lý do khi huỷ đơn để sau này tra cứu.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-2 text-end">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            Lưu trạng thái
+                        </button>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -141,4 +250,51 @@ else
             </tbody>
         </table>
     </div>
+}
+
+@section Scripts {
+    <script>
+        function cmsOrderStatusSubmit(form) {
+            if (!form.checkValidity()) {
+                return false;
+            }
+
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+            }
+
+            const fd = new FormData(form);
+            const url = form.action || '@Url.Action("ChangeStatus", "Orders")';
+
+            fetch(url, {
+                method: 'POST',
+                body: fd,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data && data.message) {
+                        alert(data.message);
+                    }
+                    if (data && data.ok) {
+                        window.location.reload();
+                    } else if (submitBtn) {
+                        submitBtn.disabled = false;
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert('Có lỗi khi cập nhật trạng thái đơn hàng.');
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                    }
+                });
+
+            // Chặn submit form mặc định
+            return false;
+        }
+    </script>
 }
