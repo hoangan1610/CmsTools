@@ -1,0 +1,150 @@
+﻿@{
+    ViewData["Title"] = "Đơn hàng realtime";
+}
+
+<h2 class="mb-3">Đơn mới (Realtime)</h2>
+
+<div id="new-order-toast-container"
+     class="position-fixed top-0 end-0 p-3"
+     style="z-index:1080;"></div>
+
+<audio id="new-order-sound" src="/sounds/new-order.mp3" preload="auto"></audio>
+
+<table class="table table-sm table-striped" id="orders-table">
+    <thead class="table-light">
+        <tr>
+            <th>Mã đơn</th>
+            <th>Khách hàng</th>
+            <th>SĐT</th>
+            <th>Tổng tiền</th>
+            <th>Thời gian</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+@section Scripts {
+    <script>
+        (function () {
+            let lastId = 0;
+
+            const tbody = document.querySelector("#orders-table tbody");
+            const toastContainer = document.getElementById("new-order-toast-container");
+            const soundEl = document.getElementById("new-order-sound");
+
+            // Hỏi quyền notification 1 lần
+            if ("Notification" in window && Notification.permission === "default") {
+                Notification.requestPermission();
+            }
+
+            function formatMoney(v) {
+                try {
+                    return Number(v).toLocaleString("vi-VN") + " đ";
+                } catch {
+                    return v;
+                }
+            }
+
+            function appendRow(o) {
+                const tr = document.createElement("tr");
+                const detailUrl = `/Orders/Detail/${o.id}`; // route Detail hiện tại
+
+                tr.innerHTML = `
+                    <td><a href="${detailUrl}" target="_blank">#${o.code}</a></td>
+                    <td>${o.customer}</td>
+                    <td>${o.phone}</td>
+                    <td>${formatMoney(o.total)}</td>
+                    <td>${o.placed_at}</td>
+                    <td>
+                        <a class="btn btn-sm btn-primary" href="${detailUrl}" target="_blank">
+                            Xem
+                        </a>
+                    </td>
+                `;
+
+                if (tbody.firstChild) {
+                    tbody.insertBefore(tr, tbody.firstChild);
+                } else {
+                    tbody.appendChild(tr);
+                }
+            }
+
+            function showToast(o) {
+                const div = document.createElement("div");
+                div.className = "toast show text-bg-success border-0 mb-2";
+                div.style.minWidth = "280px";
+                div.innerHTML = `
+                    <div class="toast-header">
+                        <strong class="me-auto">Đơn mới #${o.code}</strong>
+                        <small>vừa xong</small>
+                        <button type="button" class="btn-close ms-2 mb-1"></button>
+                    </div>
+                    <div class="toast-body">
+                        ${o.customer} – ${o.phone}<br/>
+                        Tổng: ${formatMoney(o.total)}
+                    </div>
+                `;
+                toastContainer.appendChild(div);
+
+                div.querySelector(".btn-close").onclick = () => div.remove();
+                setTimeout(() => div.remove(), 15000);
+            }
+
+            function playSound() {
+                if (!soundEl) return;
+                soundEl.currentTime = 0;
+                soundEl.play().catch(() => {});
+            }
+
+            function showBrowserNotification(o) {
+                if (!("Notification" in window)) return;
+                if (Notification.permission !== "granted") return;
+
+                const detailUrl = `/Orders/Detail/${o.id}`;
+
+                const n = new Notification("HAFood – Đơn hàng mới", {
+                    body: `#${o.code} – ${o.customer} – ${formatMoney(o.total)}`,
+                    icon: "/favicon-96.png"
+                });
+
+                n.onclick = function () {
+                    window.focus();
+                    window.open(detailUrl, "_blank");
+                };
+            }
+
+            async function poll() {
+                try {
+                    const url = `/Orders/NewSince?lastId=${lastId}`;
+                    const resp = await fetch(url, {
+                        headers: { "X-Requested-With": "XMLHttpRequest" }
+                    });
+
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (Array.isArray(data) && data.length > 0) {
+                            for (const o of data) {
+                                appendRow(o);
+                                if (o.id > lastId) lastId = o.id;
+                            }
+
+                            const newest = data[data.length - 1];
+                            showToast(newest);
+                            playSound();
+                            showBrowserNotification(newest);
+                        }
+                    } else {
+                        console.log("poll status:", resp.status);
+                    }
+                } catch (err) {
+                    console.log("poll error:", err);
+                } finally {
+                    setTimeout(poll, 3000); // 3s poll 1 lần
+                }
+            }
+
+            poll();
+        })();
+    </script>
+}

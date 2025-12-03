@@ -1,5 +1,4 @@
 ﻿using CmsTools.Models;
-
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +6,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -31,18 +31,19 @@ namespace CmsTools.Controllers
 
         private SqlConnection OpenHaf() => new SqlConnection(_hafConn);
 
-        // Row nhỏ để map SELECT user_info_id, pay_total
+        // Row nhỏ để map SELECT cho loyalty/mission
         private sealed class OrderForLoyaltyRow
         {
             public long User_Info_Id { get; set; }
             public decimal Pay_Total { get; set; }
+            public DateTime? Delivered_At { get; set; }
         }
 
         [HttpGet]
         public async Task<IActionResult> Detail(long id)
         {
             using var conn = OpenHaf();
-            await conn.OpenAsync();   // cho chắc, giống pattern UsersController
+            await conn.OpenAsync();
 
             const string sqlHeader = @"
 SELECT 
@@ -76,7 +77,6 @@ FROM dbo.tbl_orders o
 LEFT JOIN dbo.tbl_user_info u ON u.id = o.user_info_id
 LEFT JOIN dbo.tbl_address   a ON a.id = o.address_id
 WHERE o.id = @id;
-
 ";
 
             const string sqlItems = @"
@@ -149,7 +149,9 @@ ORDER BY i.id;
                     p,
                     commandType: CommandType.StoredProcedure);
 
-                // ✅ Nếu set sang "Đã giao" thì cộng điểm loyalty bằng SP
+                // ✅ Nếu set sang "Đã giao" thì:
+                // - Cộng điểm loyalty (SP cũ)
+                // - Gọi mission FIRST_ORDER_DELIVERED (SP mới)
                 if (newStatus == 3)
                 {
                     try
@@ -159,13 +161,15 @@ ORDER BY i.id;
                                 """
                                 SELECT 
                                     user_info_id AS User_Info_Id,
-                                    pay_total    AS Pay_Total
+                                    pay_total    AS Pay_Total,
+                                    delivered_at AS Delivered_At
                                 FROM dbo.tbl_orders
                                 WHERE id = @id
                                 """,
                                 new { id },
                                 commandType: CommandType.Text));
 
+                        // --- Loyalty ---
                         if (orderRow != null && orderRow.Pay_Total > 0)
                         {
                             int points = (int)Math.Floor(orderRow.Pay_Total / 1000m);
@@ -190,17 +194,34 @@ ORDER BY i.id;
                                     lp,
                                     commandType: CommandType.StoredProcedure);
 
-                                // CMS không gửi notify, để API hoặc mobile xử lý đẹp sau.
+                                // CMS không gửi notify, để API/mobile xử lý sau nếu cần.
                             }
+                        }
+
+                        // --- Mission FIRST_ORDER_DELIVERED ---
+                        if (orderRow != null)
+                        {
+                            var mp = new DynamicParameters();
+                            mp.Add("@order_id", id, DbType.Int64);
+                            mp.Add("@user_info_id", orderRow.User_Info_Id, DbType.Int64);
+                            mp.Add("@pay_total", orderRow.Pay_Total, DbType.Decimal);
+                            mp.Add("@delivered_at",
+                                orderRow.Delivered_At ?? DateTime.UtcNow,
+                                DbType.DateTime2);
+
+                            await conn.ExecuteAsync(
+                                "dbo.usp_mission_check_order_delivered",
+                                mp,
+                                commandType: CommandType.StoredProcedure);
                         }
                     }
                     catch (SqlException ex) when (ex.Number == 50601 || ex.Number == 50602)
                     {
-                        // LOYALTY_USER_NOT_FOUND / ORDER_NOT_COMPLETED: kệ, không chặn CMS
+                        // LOYALTY_USER_NOT_FOUND / ORDER_NOT_COMPLETED: bỏ qua, không chặn CMS
                     }
                     catch
                     {
-                        // Nuốt lỗi loyalty để khỏi ảnh hưởng UI CMS
+                        // Nuốt lỗi loyalty / mission để khỏi ảnh hưởng UI CMS
                     }
                 }
 
@@ -272,6 +293,67 @@ ORDER BY i.id;
                     "XMLHttpRequest",
                     StringComparison.OrdinalIgnoreCase);
             }
+        }
+
+        // ================== LIVE ORDERS (REALTIME) ==================
+
+        [HttpGet]
+        public IActionResult Live()
+        {
+            // View đơn giản, phần realtime xử lý bằng JS
+            return View(); // Views/Orders/Live.cshtml
+        }
+
+        // GET /Orders/NewSince?lastId=123
+        [HttpGet]
+        public async Task<IActionResult> NewSince(long? lastId)
+        {
+            const string sql = @"
+SELECT TOP (50)
+    id,
+    order_code,
+    ship_name,
+    ship_phone,
+    pay_total,
+    status,
+    placed_at,
+    created_at
+FROM dbo.tbl_orders
+WHERE (@lastId IS NULL OR id > @lastId)
+ORDER BY id ASC;
+";
+
+            await using var conn = OpenHaf();
+            await conn.OpenAsync();
+
+            var rows = await conn.QueryAsync(sql, new { lastId });
+
+            var vn = new CultureInfo("vi-VN");
+
+            var list = rows.Select(o =>
+            {
+                long id = o.id;
+                string code = o.order_code;
+                string customer = o.ship_name;
+                string phone = o.ship_phone;
+                decimal total = o.pay_total;
+                byte status = o.status;
+                DateTime placed =
+                    ((DateTime?)o.placed_at) ?? (DateTime)o.created_at;
+
+                return new
+                {
+                    id,
+                    code,
+                    customer,
+                    phone,
+                    total,
+                    status,
+                    placed_at = placed.ToString("HH:mm dd/MM/yyyy", vn)
+                };
+            });
+
+            return Json(list);
         }
     }
 }
