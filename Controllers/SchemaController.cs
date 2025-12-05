@@ -41,7 +41,7 @@ SELECT
     t.table_name        AS TableName,
     t.display_name      AS DisplayName,
     t.primary_key       AS PrimaryKey,
-    t.custom_detail_url AS CustomDetailUrl       -- 👈 thêm dòng này
+    t.custom_detail_url AS CustomDetailUrl
 FROM dbo.tbl_cms_table t
 JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
 ORDER BY c.name, t.schema_name, t.table_name;";
@@ -62,14 +62,15 @@ ORDER BY c.name, t.schema_name, t.table_name;";
 
             var tableSql = @"
 SELECT id,
-       connection_id AS ConnectionId,
-       schema_name   AS SchemaName,
-       table_name    AS TableName,
-       display_name  AS DisplayName,
-       primary_key   AS PrimaryKey,
-       is_view       AS IsView,
-       is_enabled    AS IsEnabled,
-       row_filter    AS RowFilter
+       connection_id     AS ConnectionId,
+       schema_name       AS SchemaName,
+       table_name        AS TableName,
+       display_name      AS DisplayName,
+       primary_key       AS PrimaryKey,
+       custom_detail_url AS CustomDetailUrl,
+       is_view           AS IsView,
+       is_enabled        AS IsEnabled,
+       row_filter        AS RowFilter
 FROM dbo.tbl_cms_table
 WHERE id = @id;";
 
@@ -115,14 +116,15 @@ ORDER BY sort_order, column_name;";
 
             var tableSql = @"
 SELECT id,
-       connection_id AS ConnectionId,
-       schema_name   AS SchemaName,
-       table_name    AS TableName,
-       display_name  AS DisplayName,
-       primary_key   AS PrimaryKey,
-       is_view       AS IsView,
-       is_enabled    AS IsEnabled,
-       row_filter    AS RowFilter
+       connection_id     AS ConnectionId,
+       schema_name       AS SchemaName,
+       table_name        AS TableName,
+       display_name      AS DisplayName,
+       primary_key       AS PrimaryKey,
+       custom_detail_url AS CustomDetailUrl,
+       is_view           AS IsView,
+       is_enabled        AS IsEnabled,
+       row_filter        AS RowFilter
 FROM dbo.tbl_cms_table
 WHERE id = @id;";
 
@@ -151,7 +153,28 @@ ORDER BY sort_order, column_name;";
 
             var cols = (await conn.QueryAsync<CmsColumnMeta>(colSql, new { tableId })).ToList();
 
-            const string updateSql = @"
+            // ===== 2.1) UPDATE META CỦA BẢNG (tbl_cms_table) =====
+            var tableDisplayName = form["table_display_name"].ToString();
+            var tablePrimaryKey = form["table_primary_key"].ToString();
+            var tableDetailUrl = form["table_custom_detail_url"].ToString();
+
+            const string updateTableSql = @"
+UPDATE dbo.tbl_cms_table
+SET display_name      = @DisplayName,
+    primary_key       = @PrimaryKey,
+    custom_detail_url = @CustomDetailUrl
+WHERE id = @Id;";
+
+            await conn.ExecuteAsync(updateTableSql, new
+            {
+                Id = tableId,
+                DisplayName = string.IsNullOrWhiteSpace(tableDisplayName) ? null : tableDisplayName.Trim(),
+                PrimaryKey = string.IsNullOrWhiteSpace(tablePrimaryKey) ? null : tablePrimaryKey.Trim(),
+                CustomDetailUrl = string.IsNullOrWhiteSpace(tableDetailUrl) ? null : tableDetailUrl.Trim()
+            });
+
+            // ===== 2.2) UPDATE CẤU HÌNH CỘT (tbl_cms_column) =====
+            const string updateColSql = @"
 UPDATE dbo.tbl_cms_column
 SET display_name = @DisplayName,
     is_list      = @IsList,
@@ -191,10 +214,10 @@ WHERE id = @Id;";
                     DefaultExpr = string.IsNullOrWhiteSpace(defaultExpr) ? null : defaultExpr
                 };
 
-                await conn.ExecuteAsync(updateSql, param);
+                await conn.ExecuteAsync(updateColSql, param);
             }
 
-            TempData["SchemaMessage"] = "Đã lưu cấu hình cột.";
+            TempData["SchemaMessage"] = "Đã lưu cấu hình bảng và cột.";
 
             return RedirectToAction("Columns", new { tableId });
         }

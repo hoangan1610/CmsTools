@@ -23,8 +23,10 @@
                 <a class="navbar-brand fw-semibold" asp-controller="Home" asp-action="Index">
                     CMS_Tools
                 </a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#cmsNavbar"
-                        aria-controls="cmsNavbar" aria-expanded="false" aria-label="Toggle navigation">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#cmsNavbar"
+                        aria-controls="cmsNavbar" aria-expanded="false"
+                        aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
 
@@ -32,51 +34,101 @@
                     <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                         @if (isAdmin)
                         {
+                            <!-- Mục lộ trình chính -->
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="Schema" asp-action="Index">
                                     Schema
                                 </a>
                             </li>
 
+                            <!-- Dropdown Quyền -->
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#"
+                                   id="navPermissions" role="button"
+                                   data-bs-toggle="dropdown" aria-expanded="false">
+                                    Quyền
+                                </a>
+                                <ul class="dropdown-menu" aria-labelledby="navPermissions">
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Permissions" asp-action="Index">
+                                            Quyền theo role
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Permissions" asp-action="Tables">
+                                            Quyền theo bảng
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+
+                            <!-- Dropdown Người dùng -->
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#"
+                                   id="navUsers" role="button"
+                                   data-bs-toggle="dropdown" aria-expanded="false">
+                                    Người dùng
+                                </a>
+                                <ul class="dropdown-menu" aria-labelledby="navUsers">
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Users" asp-action="Index">
+                                            Users
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Users" asp-action="LoginLogs">
+                                            Login logs
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+
+                            <!-- Dropdown Hệ thống -->
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#"
+                                   id="navSystem" role="button"
+                                   data-bs-toggle="dropdown" aria-expanded="false">
+                                    Hệ thống
+                                </a>
+                                <ul class="dropdown-menu" aria-labelledby="navSystem">
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Connections" asp-action="Index">
+                                            Connections
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Audit" asp-action="Index">
+                                            Audit log
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item"
+                                           asp-controller="Health" asp-action="Connections">
+                                            Health
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+
+                            <!-- Báo cáo để ngoài cho dễ bấm -->
                             <li class="nav-item">
-                                <a class="nav-link" asp-controller="Permissions" asp-action="Index">
-                                    Quyền theo role
+                                <a class="nav-link" asp-controller="Reports" asp-action="Revenue">
+                                    📈 Báo cáo doanh thu
                                 </a>
                             </li>
 
+                            <!-- Đơn mới realtime (LIVE) -->
                             <li class="nav-item">
-                                <a class="nav-link" asp-controller="Permissions" asp-action="Tables">
-                                    Quyền theo bảng
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Users" asp-action="Index">
-                                    Users
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Users" asp-action="LoginLogs">
-                                    Login logs
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Connections" asp-action="Index">
-                                    Connections
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Audit" asp-action="Index">
-                                    Audit log
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Health" asp-action="Connections">
-                                    Health
+                                <a class="nav-link d-flex align-items-center"
+                                   asp-controller="Orders" asp-action="live">
+                                    <span class="me-1">🔴 Đơn mới</span>
+                                    <span class="badge rounded-pill bg-danger">LIVE</span>
                                 </a>
                             </li>
                         }
@@ -91,7 +143,8 @@
                                 </span>
                             </li>
                             <li class="nav-item">
-                                <form class="d-inline" method="post" asp-controller="Account" asp-action="Logout">
+                                <form class="d-inline" method="post"
+                                      asp-controller="Account" asp-action="Logout">
                                     <button type="submit" class="btn btn-sm btn-outline-light">
                                         Đăng xuất
                                     </button>
@@ -111,8 +164,8 @@
                 @{
                     int? currentTableId = null;
 
-                    if (Context.Request.RouteValues.TryGetValue("tableId", out var tblRoute) &&
-                    int.TryParse(tblRoute?.ToString(), out var tid1))
+                    if (Context.Request.RouteValues.TryGetValue("tableId", out var tblRoute)
+                    && int.TryParse(tblRoute?.ToString(), out var tid1))
                     {
                         currentTableId = tid1;
                     }

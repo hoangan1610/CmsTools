@@ -1,4 +1,4 @@
-﻿/* Layout tổng */
+﻿/* =================== LAYOUT TỔNG =================== */
 .cms-body {
     background-color: #f4f5f7;
     font-size: 0.9375rem; /* ~15px */
@@ -26,7 +26,7 @@
     padding: 0.75rem 0.5rem;
 }
 
-/* Tùy theo view component SchemaTree của bạn */
+/* Schema tree bên trái */
 .schema-tree-title {
     font-size: 0.75rem;
     font-weight: 600;
@@ -71,7 +71,6 @@
     padding: 1rem 1.25rem 1.5rem;
 }
 
-    /* Card “giả” cho content */
     .cms-main > h1,
     .cms-main > h2,
     .cms-main > .page-title {
@@ -85,7 +84,7 @@
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
-/* Bảng dữ liệu chung */
+/* Bảng bootstrap chung */
 .table-sm th,
 .table-sm td {
     padding-top: 0.35rem;
@@ -103,13 +102,12 @@
     font-size: 0.7rem;
 }
 
-/* Form nhỏ gọn */
+/* Label nhỏ */
 .form-label.small {
     font-size: 0.75rem;
 }
 
-/* Responsive – trên mobile, cho sidebar xuống dưới nội dung nếu muốn
-   (tùy, có thể bỏ nếu bạn thích sidebar luôn trên đầu) */
+/* Mobile: giảm chiều cao sidebar */
 @media (max-width: 767.98px) {
     .cms-sidebar {
         height: auto;
@@ -117,6 +115,7 @@
     }
 }
 
+/* Tree connection */
 .cmstree {
     font-size: 0.82rem;
 }
@@ -144,8 +143,9 @@
     text-overflow: ellipsis;
 }
 
-/* ===== Layout chung cho trang data list ===== */
+/* =================== DATA LIST (Data/List) =================== */
 
+/* Header trang */
 .cmstools-page-header {
     display: flex;
     flex-wrap: wrap;
@@ -154,16 +154,18 @@
     gap: 0.75rem;
     margin-top: 1rem;
     margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem 0.25rem;
 }
 
 .cmstools-page-title {
-    font-size: 1.25rem;
+    font-size: 1.4rem;
+    font-weight: 600;
     margin: 0;
 }
 
 .cmstools-page-subtitle {
-    font-size: 0.875rem;
-    color: #6c757d;
+    font-size: 0.85rem;
+    color: #6b7280;
 }
 
 .cmstools-page-actions {
@@ -173,17 +175,36 @@
     gap: 0.5rem;
 }
 
-/* ===== Filter form ===== */
+/* Filter card */
+.cmstools-filter-card {
+    border-radius: 0.9rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: radial-gradient(circle at top left, #e5f0ff 0, #f9fafb 40%, #ffffff 100%);
+}
+
+.cmstools-filter-form {
+    font-size: 0.82rem;
+}
 
 .cmstools-filter-row .form-label {
     font-weight: 500;
+    font-size: 0.75rem;
 }
 
-/* ===== Bảng dữ liệu ===== */
+.cmstools-filter-adv-toggle {
+    text-decoration: none;
+    padding-left: 0;
+    padding-right: 0;
+}
 
+/* Bảng dữ liệu */
 .cmstools-table-container {
     max-width: 100%;
     position: relative;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    overflow: hidden;
+    background-color: #ffffff;
 }
 
 .cmstools-table-scroll {
@@ -192,7 +213,7 @@
     overflow-y: hidden;
 }
 
-    /* làm scrollbar thấp xuống một chút, dễ nhìn hơn */
+    /* Scrollbar ngang */
     .cmstools-table-scroll::-webkit-scrollbar {
         height: 6px;
     }
@@ -210,8 +231,9 @@
             background: #a1a1a1;
         }
 
+/* Không wrap toàn bộ cột, trừ cột THAO TÁC sẽ override bên dưới */
 .cmstools-table {
-    white-space: nowrap; /* mỗi cell không wrap, dùng scroll ngang */
+    white-space: nowrap;
 }
 
 .cmstools-th {
@@ -224,7 +246,29 @@
     vertical-align: middle;
 }
 
-/* ảnh thumbnail trong cell */
+/* Padding hàng nhỏ lại */
+.cmstools-table.table-sm > :not(caption) > * > * {
+    padding-top: 0.22rem;
+    padding-bottom: 0.22rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+}
+
+/* Header bảng */
+.cmstools-table thead th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background-color: #f3f4f6;
+}
+
+/* Hover row */
+.cmstools-table tbody tr:hover {
+    background-color: #fefce8;
+    transition: background-color 0.12s linear;
+}
+
+/* Thumbnail ảnh */
 .cmstools-img-thumb {
     max-height: 40px;
     max-width: 80px;
@@ -233,14 +277,9 @@
     border: 1px solid rgba(0,0,0,0.05);
 }
 
-/* nhỏ lại padding để đỡ chiếm chỗ */
-.cmstools-table.table-sm > :not(caption) > * > * {
-    padding-top: 0.25rem;
-    padding-bottom: 0.25rem;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-}
+/* ===== Cột THAO TÁC ===== */
 
+/* Sticky cột thao tác bên trái */
 .cmstools-th-actions,
 .cmstools-td-actions {
     position: sticky;
@@ -249,26 +288,294 @@
     background-color: #fff;
 }
 
-/* Cho header cao hơn chút để đè lên cell */
+/* Header cao hơn một chút */
 .cmstools-th-actions {
     z-index: 4;
 }
-/* Cho body scroll khi modal mở (phòng trường hợp bị khóa cứng) */
+
+/* Cho phép wrap chữ trong cột thao tác, tránh kéo bảng quá rộng */
+.cmstools-td-actions {
+    white-space: normal !important;
+    min-width: 180px;
+}
+
+    /* Nhóm nút trong cột thao tác (btn-group trong Razor) */
+    .cmstools-td-actions .btn-group {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    /* Nút trong cột thao tác: pill nhỏ */
+    .cmstools-td-actions .btn {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        line-height: 1.1;
+        min-width: 0;
+    }
+
+    /* Nút Ẩn / Kích hoạt (form ở ngoài btn-group) cũng nhỏ theo */
+    .cmstools-td-actions form .btn {
+        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+    }
+
+/* Màn vừa (ThinkPad 14" FHD) – thu nút lại chút */
+@media (max-width: 1440px) {
+    .cmstools-td-actions {
+        min-width: 160px;
+    }
+
+        .cmstools-td-actions .btn {
+            font-size: 0.7rem;
+            padding-inline: 0.4rem;
+        }
+}
+
+/* Màn hẹp hơn – cho phép group xuống 2 hàng, vẫn gọn */
+@media (max-width: 1200px) {
+    .cmstools-td-actions {
+        min-width: 150px;
+    }
+
+        .cmstools-td-actions .btn-group {
+            flex-wrap: wrap;
+            justify-content: flex-start;
+        }
+}
+
+/* =================== MODAL =================== */
+
 .modal-open {
     overflow: hidden;
 }
 
-/* Đảm bảo phần thân modal scroll được, kể cả form dài */
 .modal-dialog-scrollable .modal-body {
     max-height: calc(100vh - 160px); /* chừa header + footer */
     overflow-y: auto;
 }
 
-/* Cho modal full chiều cao cũng mượt hơn trên màn hình nhỏ */
 .modal-dialog.modal-lg {
     margin: 1.5rem auto;
 }
+
 .cmstools-modal-error .alert-danger {
     margin-top: 0.5rem;
     margin-bottom: 0.5rem;
+}
+
+/* =================== REVENUE REPORT (nếu có) =================== */
+
+.report-filter-card {
+    border-radius: 0.9rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: radial-gradient(circle at top left, #e0f2fe 0, #f9fafb 40%, #ffffff 100%);
+}
+
+/* Wrapper ô ngày dd/MM/yyyy */
+.cmstools-date-wrapper {
+    position: relative;
+}
+
+    .cmstools-date-wrapper .js-date-display {
+        padding-right: 2rem;
+        font-variant-numeric: tabular-nums;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16'%3E%3Cpath fill='%2394a3b8' d='M3 2a1 1 0 0 1 1-1h.5a.5.5 0 0 1 0 1H4v1h8V2h-.5a.5.5 0 0 1 0-1H12a1 1 0 0 1 1 1v1h1.5A1.5 1.5 0 0 1 16 4.5v9A1.5 1.5 0 0 1 14.5 15h-13A1.5 1.5 0 0 1 0 13.5v-9A1.5 1.5 0 0 1 1.5 3H3zm-2 3v8.5a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5V5z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.5rem center;
+        background-size: 14px 14px;
+    }
+
+        .cmstools-date-wrapper .js-date-display.is-invalid {
+            border-color: #f97373;
+        }
+
+/* Nút chọn range nhanh */
+.report-range-chips .btn {
+    border-radius: 999px;
+    border-color: transparent;
+    background-color: #e5e7eb;
+    font-size: 0.75rem;
+    padding-inline: 0.65rem;
+}
+
+    .report-range-chips .btn:hover {
+        background-color: #d1d5db;
+    }
+
+    .report-range-chips .btn:focus,
+    .report-range-chips .btn:active {
+        background-color: #0ea5e9;
+        color: #fff;
+    }
+
+/* KPI cards */
+.report-kpi-row {
+    margin-top: 0.25rem;
+}
+
+.report-kpi-card {
+    border-radius: 0.9rem;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+    transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, border-color 0.15s;
+}
+
+    .report-kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+        border-color: rgba(59, 130, 246, 0.4);
+    }
+
+.report-kpi-main {
+    background: radial-gradient(circle at top left, #d1fae5 0, #ecfdf5 35%, #ffffff 100%);
+}
+
+.report-kpi-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b7280;
+}
+
+.report-kpi-value {
+    font-variant-numeric: tabular-nums;
+}
+
+.report-kpi-delta {
+    font-size: 0.78rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.report-kpi-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background-color: currentColor;
+}
+
+.report-kpi-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.04);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    color: #0f172a;
+}
+
+.report-chart-card {
+    border-radius: 0.9rem;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: radial-gradient(circle at top, #eff6ff 0, #ffffff 45%);
+}
+
+.report-section-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+}
+
+/* Badge phụ */
+.report-badge-soft {
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.7rem;
+    background-color: #eff6ff;
+    color: #1d4ed8;
+}
+/* ===== Thu gọn cột THAO TÁC, đỡ rối mắt (dùng đúng HTML hiện tại) ===== */
+
+/* Cho phép xuống dòng, không kéo rộng bảng */
+.cmstools-td-actions {
+    white-space: normal !important;
+}
+
+/* Bố cục 2 tầng trong cột THAO TÁC */
+.cmstools-td-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    min-width: 170px;
+}
+
+    /* HÀNG 1 = btn-group: Sửa / Chi tiết / Xem nhanh */
+    .cmstools-td-actions > .btn-group {
+        order: 1;
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+        .cmstools-td-actions > .btn-group > .btn {
+            font-size: 0.75rem;
+            padding: 0.14rem 0.55rem;
+            border-radius: 999px;
+            line-height: 1.1;
+            min-width: 0;
+        }
+
+    /* HÀNG 2 = các nút / form còn lại (Duyệt / Phản hồi, Ẩn/Hiện...) */
+    .cmstools-td-actions > button,
+    .cmstools-td-actions > form {
+        order: 2;
+    }
+
+        /* Nút hàng 2: nhỏ, màu nhẹ kiểu link */
+        .cmstools-td-actions > button.btn,
+        .cmstools-td-actions > form > button.btn {
+            font-size: 0.7rem;
+            padding: 0.05rem 0.4rem;
+            border-radius: 999px;
+            background-color: transparent;
+            border-color: transparent;
+            color: #4b5563; /* xám */
+        }
+
+            /* Nhấn nhẹ cho nút Ẩn / Hiện (warning) */
+            .cmstools-td-actions > button.btn.btn-warning,
+            .cmstools-td-actions > form > button.btn.btn-warning,
+            .cmstools-td-actions > form > button.btn.btn-outline-warning {
+                background-color: #fef3c7;
+                border-color: #fef3c7;
+                color: #92400e;
+            }
+
+        /* Nút kích hoạt / ẩn trạng thái ở bảng khác (Active / Ẩn) */
+        .cmstools-td-actions > form > button.btn-outline-success {
+            background-color: #dcfce7;
+            border-color: #dcfce7;
+            color: #166534;
+        }
+
+        .cmstools-td-actions > form > button.btn-outline-warning {
+            background-color: #fef3c7;
+            border-color: #fef3c7;
+            color: #92400e;
+        }
+
+/* Màn vừa – thu hẹp lại một chút */
+@media (max-width: 1440px) {
+    .cmstools-td-actions {
+        min-width: 160px;
+    }
+}
+
+/* Màn hẹp – cho group hàng 1 được wrap */
+@media (max-width: 1200px) {
+    .cmstools-td-actions {
+        min-width: 150px;
+    }
+
+        .cmstools-td-actions > .btn-group {
+            flex-wrap: wrap;
+        }
 }

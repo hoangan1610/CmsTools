@@ -23,6 +23,47 @@
     @Html.AntiForgeryToken()
     <input type="hidden" name="tableId" value="@Model.Table.Id" />
 
+    <!-- 🔹 CẤU HÌNH THÔNG TIN BẢNG -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Tên hiển thị bảng</label>
+                    <input type="text"
+                           name="table_display_name"
+                           class="form-control form-control-sm"
+                           value="@(Model.Table.DisplayName ?? "")"
+                           placeholder="VD: Đơn hàng, Sản phẩm, Đánh giá..." />
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Primary key</label>
+                    <input type="text"
+                           name="table_primary_key"
+                           class="form-control form-control-sm"
+                           value="@(Model.Table.PrimaryKey ?? "")"
+                           placeholder="VD: id, order_id..." />
+                    <div class="form-text small">
+                        Nếu để trống sẽ tự ưu tiên cột IsPrimary hoặc 'id'.
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Custom detail URL</label>
+                    <input type="text"
+                           name="table_custom_detail_url"
+                           class="form-control form-control-sm"
+                           value="@(Model.Table.CustomDetailUrl ?? "")"
+                           placeholder="VD: /Orders/Detail/{id}" />
+                    <div class="form-text small">
+                        Dùng {id} hoặc {pk} để inject giá trị khóa chính.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🔻 BẢNG CẤU HÌNH CỘT -->
     <div class="table-responsive">
         <table class="table table-sm table-bordered align-middle">
             <thead class="table-light">
@@ -102,10 +143,10 @@
         </table>
     </div>
 
-    <button type="submit" class="btn btn-primary">
+    <button type="submit" class="btn btn-primary mt-2">
         Lưu cấu hình
     </button>
-    <a class="btn btn-secondary ms-2"
+    <a class="btn btn-secondary mt-2 ms-2"
        href="@Url.Action("Index", "Schema")">
         Quay lại danh sách bảng
     </a>
