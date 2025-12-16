@@ -29,13 +29,11 @@
                 @foreach (var r in Model.CopyRoles)
                 {
                     var selected = Model.CopyFromRoleId.HasValue && Model.CopyFromRoleId.Value == r.Id;
-
                     <option value="@r.Id" selected="@(selected ? "selected" : null)">
                         @r.Name
                     </option>
                 }
             </select>
-
         </div>
         <div class="col-auto">
             <button type="submit" class="btn btn-sm btn-outline-secondary">
@@ -57,7 +55,7 @@
 
     <div class="mb-2 text-muted">
         <small>
-            Tick vào Xem / Tạo / Sửa / Xóa cho từng bảng.
+            Tick vào Xem / Tạo / Sửa / Xóa và các quyền trạng thái (Publish/Schedule/Archive).
             Nếu không chọn flag nào và không nhập row_filter thì role coi như không có rule riêng cho bảng đó.
         </small>
     </div>
@@ -69,13 +67,41 @@
                     <th style="width:60px;">#</th>
                     <th>Connection</th>
                     <th>Bảng</th>
-                    <th style="width:80px;">Xem</th>
-                    <th style="width:80px;">Tạo</th>
-                    <th style="width:80px;">Sửa</th>
-                    <th style="width:80px;">Xóa</th>
+
+                    <th class="text-center" style="width:86px;">
+                        Xem<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="view" title="Chọn/Bỏ tất cả Xem" />
+                    </th>
+                    <th class="text-center" style="width:86px;">
+                        Tạo<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="create" title="Chọn/Bỏ tất cả Tạo" />
+                    </th>
+                    <th class="text-center" style="width:86px;">
+                        Sửa<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="update" title="Chọn/Bỏ tất cả Sửa" />
+                    </th>
+                    <th class="text-center" style="width:86px;">
+                        Xóa<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="delete" title="Chọn/Bỏ tất cả Xóa" />
+                    </th>
+
+                    <th class="text-center" style="width:110px;">
+                        Publish<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="publish" title="Chọn/Bỏ tất cả Publish" />
+                    </th>
+                    <th class="text-center" style="width:110px;">
+                        Schedule<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="schedule" title="Chọn/Bỏ tất cả Schedule" />
+                    </th>
+                    <th class="text-center" style="width:110px;">
+                        Archive<br />
+                        <input type="checkbox" class="form-check-input js-col-all" data-col="archive" title="Chọn/Bỏ tất cả Archive" />
+                    </th>
+
                     <th>Row filter (WHERE ...)</th>
                 </tr>
             </thead>
+
             <tbody>
                 @for (int i = 0; i < Model.Items.Count; i++)
                 {
@@ -97,21 +123,28 @@
                         </td>
 
                         <td class="text-center">
-                            <input class="form-check-input" type="checkbox"
-                                   asp-for="Items[@i].CanView" />
+                            <input class="form-check-input js-col-view" type="checkbox" asp-for="Items[@i].CanView" />
                         </td>
                         <td class="text-center">
-                            <input class="form-check-input" type="checkbox"
-                                   asp-for="Items[@i].CanCreate" />
+                            <input class="form-check-input js-col-create" type="checkbox" asp-for="Items[@i].CanCreate" />
                         </td>
                         <td class="text-center">
-                            <input class="form-check-input" type="checkbox"
-                                   asp-for="Items[@i].CanUpdate" />
+                            <input class="form-check-input js-col-update" type="checkbox" asp-for="Items[@i].CanUpdate" />
                         </td>
                         <td class="text-center">
-                            <input class="form-check-input" type="checkbox"
-                                   asp-for="Items[@i].CanDelete" />
+                            <input class="form-check-input js-col-delete" type="checkbox" asp-for="Items[@i].CanDelete" />
                         </td>
+
+                        <td class="text-center">
+                            <input class="form-check-input js-col-publish" type="checkbox" asp-for="Items[@i].CanPublish" />
+                        </td>
+                        <td class="text-center">
+                            <input class="form-check-input js-col-schedule" type="checkbox" asp-for="Items[@i].CanSchedule" />
+                        </td>
+                        <td class="text-center">
+                            <input class="form-check-input js-col-archive" type="checkbox" asp-for="Items[@i].CanArchive" />
+                        </td>
+
                         <td>
                             <input class="form-control form-control-sm"
                                    asp-for="Items[@i].RowFilter"
@@ -124,12 +157,43 @@
     </div>
 
     <button type="submit" class="btn btn-primary mt-2">Lưu quyền</button>
-    <a asp-controller="Permissions" asp-action="Index"
-       class="btn btn-secondary mt-2 ms-2">
+    <a asp-controller="Permissions" asp-action="Index" class="btn btn-secondary mt-2 ms-2">
         Quay lại
     </a>
 </form>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        (function () {
+            function setAll(selector, checked) {
+                document.querySelectorAll(selector).forEach(function (el) {
+                    if (!el.disabled) el.checked = checked;
+                });
+            }
+
+            document.querySelectorAll(".js-col-all").forEach(function (hdr) {
+                hdr.addEventListener("change", function () {
+                    var col = hdr.getAttribute("data-col");
+                    if (!col) return;
+
+                    var map = {
+                        view: ".js-col-view",
+                        create: ".js-col-create",
+                        update: ".js-col-update",
+                        delete: ".js-col-delete",
+                        publish: ".js-col-publish",
+                        schedule: ".js-col-schedule",
+                        archive: ".js-col-archive"
+                    };
+
+                    var sel = map[col];
+                    if (!sel) return;
+
+                    setAll(sel, hdr.checked);
+                });
+            });
+        })();
+    </script>
 }

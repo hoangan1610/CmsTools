@@ -111,6 +111,45 @@
         }
     </div>
 
+    @* ==== THÔNG TIN AI MODERATION (nếu có) ==== *@
+    @if (Model.Ai_Decision_Source.HasValue ||
+        !string.IsNullOrWhiteSpace(Model.Ai_Reason) ||
+        !string.IsNullOrWhiteSpace(Model.Ai_Flags_Json))
+    {
+        <div class="mb-3 small">
+            <strong>AI moderation:</strong>
+            <div class="mt-1">
+                @if (Model.Ai_Decision_Source.HasValue)
+                {
+                    var srcText = Model.Ai_Decision_Source switch
+                    {
+                        1 => "Rule-based / local AI",
+                        2 => "LLM (OpenAI-compatible)",
+                        _ => "Không dùng AI"
+                    };
+
+                    <span class="badge bg-secondary me-1">@srcText</span>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Model.Ai_Reason))
+                {
+                    <span class="badge bg-info text-dark me-1">
+                        @Model.Ai_Reason
+                    </span>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Model.Ai_Flags_Json))
+                {
+                    <div class="mt-1">
+                        <span class="text-muted">Flags:</span>
+                        <code style="font-size:.8rem;">@Model.Ai_Flags_Json</code>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+
     @* ==== FORM CẬP NHẬT TRẠNG THÁI – chỉ cho phép khi đang CHỜ DUYỆT ==== *@
     @if (Model.Status == 0)
     {

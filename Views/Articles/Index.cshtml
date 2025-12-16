@@ -1,0 +1,128 @@
+﻿@model List<CmsTools.Models.CmsArticleListItemVm>
+
+@{
+    ViewData["Title"] = "Bài viết";
+
+    int page = (int)(ViewBag.Page ?? 1);
+    int pageSize = (int)(ViewBag.PageSize ?? 20);
+    int total = (int)(ViewBag.Total ?? 0);
+    int totalPages = (int)Math.Ceiling(total / (double)pageSize);
+
+    string q = (string)(ViewBag.Q ?? "");
+    byte? status = ViewBag.Status as byte?;
+    string categorySlug = (string)(ViewBag.CategorySlug ?? "");
+    string tagSlug = (string)(ViewBag.TagSlug ?? "");
+}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Quản lý bài viết</h3>
+    <a class="btn btn-primary" href="/Articles/Edit">+ Tạo bài viết</a>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-4">
+        <input class="form-control" name="q" value="@q" placeholder="Tìm theo tiêu đề / slug / nội dung..." />
+    </div>
+
+    <div class="col-md-2">
+        <select class="form-select" name="status">
+            <option value="">-- Trạng thái --</option>
+            <option value="0" selected="@(status == 0)">Nháp</option>
+            <option value="1" selected="@(status == 1)">Đã đăng</option>
+            <option value="2" selected="@(status == 2)">Hẹn giờ</option>
+            <option value="3" selected="@(status == 3)">Lưu trữ</option>
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <input class="form-control" name="categorySlug" value="@categorySlug" placeholder="Slug danh mục" />
+    </div>
+
+    <div class="col-md-2">
+        <input class="form-control" name="tagSlug" value="@tagSlug" placeholder="Slug thẻ" />
+    </div>
+
+    <div class="col-md-2 d-grid">
+        <button class="btn btn-outline-secondary" type="submit">Lọc</button>
+    </div>
+</form>
+
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th style="width:80px">ID</th>
+                <th>Tiêu đề</th>
+                <th style="width:240px">Slug</th>
+                <th style="width:120px">Trạng thái</th>
+                <th style="width:180px">Hẹn đăng (VN)</th>  @* ✅ thêm *@
+                <th style="width:140px">Trang chủ</th>
+                <th style="width:180px">Cập nhật (UTC)</th>
+                <th style="width:120px"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model == null || Model.Count == 0)
+            {
+                <tr><td colspan="8" class="text-muted">Chưa có bài viết.</td></tr>
+            }
+            else
+            {
+                foreach (var a in Model)
+                {
+                    string statusText = a.Status switch
+                    {
+                        1 => "Đã đăng",
+                        2 => "Hẹn giờ",
+                        3 => "Lưu trữ",
+                        _ => "Nháp"
+                    };
+
+                    <tr>
+                        <td>@a.Id</td>
+                        <td class="fw-semibold">@a.Title</td>
+                        <td><code>@a.Slug</code></td>
+                        <td>@statusText</td>
+
+                        <td>
+                            @if (a.Status == 2 && a.Scheduled_At_Utc != null)
+                            {
+                                @a.Scheduled_At_Utc.Value.AddHours(7).ToString("dd/MM/yyyy HH:mm")
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+
+                        <td>
+                            @(a.Is_Featured ? $"Có (#{a.Featured_Order?.ToString() ?? "-"})" : "Không")
+                        </td>
+                        <td>@a.Updated_At_Utc.AddHours(7).ToString("dd/MM/yyyy HH:mm")</td>
+
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="/Articles/Edit/@a.Id">Sửa</a>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+
+@if (totalPages > 1)
+{
+    <nav>
+        <ul class="pagination">
+            @for (int i = 1; i <= totalPages; i++)
+            {
+                var active = (i == page) ? "active" : "";
+                var url = $"/Articles?q={Uri.EscapeDataString(q ?? "")}&status={status}&categorySlug={Uri.EscapeDataString(categorySlug ?? "")}&tagSlug={Uri.EscapeDataString(tagSlug ?? "")}&page={i}&pageSize={pageSize}";
+                <li class="page-item @active">
+                    <a class="page-link" href="@url">@i</a>
+                </li>
+            }
+        </ul>
+    </nav>
+}

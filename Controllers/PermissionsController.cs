@@ -26,7 +26,6 @@ namespace CmsTools.Controllers
         private IDbConnection OpenMeta() => new SqlConnection(_metaConn);
 
         // ===== 1) INDEX: danh sách role + số user + số bảng có permission =====
-        // ===== 1) INDEX: danh sách role + số user + số bảng có permission =====
         [HttpGet]
         public async Task<IActionResult> Index()
         {
@@ -50,11 +49,9 @@ ORDER BY r.name;";
 
             using var conn = OpenMeta();
             var list = (await conn.QueryAsync<RoleListItem>(sql)).ToList();
-
-            return View(list); // Views/Permissions/Index.cshtml  -> @model IReadOnlyList<RoleListItem>
+            return View(list);
         }
 
-        // ===== 2) EDIT (GET): sửa permission của 1 role =====
         // ===== 2) EDIT (GET): sửa permission của 1 role =====
         [HttpGet]
         public async Task<IActionResult> Edit(int roleId)
@@ -63,12 +60,10 @@ ORDER BY r.name;";
             if (vm == null)
                 return NotFound("Role không tồn tại.");
 
-            return View(vm); // Views/Permissions/Edit.cshtml
+            return View(vm);
         }
 
-        private async Task<TablePermissionEditViewModel?> BuildPermissionViewModelAsync(
-    int roleId,
-    int? permSourceRoleId)
+        private async Task<TablePermissionEditViewModel?> BuildPermissionViewModelAsync(int roleId, int? permSourceRoleId)
         {
             using var conn = OpenMeta();
 
@@ -78,8 +73,7 @@ FROM dbo.tbl_cms_role
 WHERE id = @id;";
 
             var role = await conn.QueryFirstOrDefaultAsync(roleSql, new { id = roleId });
-            if (role == null)
-                return null;
+            if (role == null) return null;
 
             // Danh sách role khác để hiển thị trong dropdown copy
             const string rolesSql = @"
@@ -88,14 +82,12 @@ FROM dbo.tbl_cms_role
 WHERE id <> @roleId
 ORDER BY name;";
 
-            var copyRoles = (await conn.QueryAsync<CmsRoleOption>(
-                rolesSql,
-                new { roleId }))
+            var copyRoles = (await conn.QueryAsync<CmsRoleOption>(rolesSql, new { roleId }))
                 .ToList();
 
-            // Nếu không chỉ định permSourceRoleId -> dùng chính roleId (bình thường)
             var permRoleId = permSourceRoleId ?? roleId;
 
+            // ✅ FIX: thiếu dấu phẩy + sai vị trí RowFilter + dư dấu phẩy trước FROM
             const string tableSql = @"
 SELECT 
     t.id                  AS TableId,
@@ -103,11 +95,17 @@ SELECT
     t.table_name          AS TableName,
     t.display_name        AS DisplayName,
     c.name                AS ConnectionName,
-    ISNULL(tp.can_view,   0) AS CanView,
-    ISNULL(tp.can_create, 0) AS CanCreate,
-    ISNULL(tp.can_update, 0) AS CanUpdate,
-    ISNULL(tp.can_delete, 0) AS CanDelete,
-    tp.row_filter         AS RowFilter
+
+    ISNULL(tp.can_view,     0) AS CanView,
+    ISNULL(tp.can_create,   0) AS CanCreate,
+    ISNULL(tp.can_update,   0) AS CanUpdate,
+    ISNULL(tp.can_delete,   0) AS CanDelete,
+
+    ISNULL(tp.can_publish,  0) AS CanPublish,
+    ISNULL(tp.can_schedule, 0) AS CanSchedule,
+    ISNULL(tp.can_archive,  0) AS CanArchive,
+
+    tp.row_filter           AS RowFilter
 FROM dbo.tbl_cms_table t
 JOIN dbo.tbl_cms_connection c
     ON t.connection_id = c.id
@@ -126,10 +124,16 @@ ORDER BY c.name, t.schema_name, t.table_name;";
                     ? $"{(string)r.SchemaName}.{(string)r.TableName}"
                     : (string)r.DisplayName,
                 ConnectionName = r.ConnectionName,
+
                 CanView = (bool)r.CanView,
                 CanCreate = (bool)r.CanCreate,
                 CanUpdate = (bool)r.CanUpdate,
                 CanDelete = (bool)r.CanDelete,
+
+                CanPublish = (bool)r.CanPublish,
+                CanSchedule = (bool)r.CanSchedule,
+                CanArchive = (bool)r.CanArchive,
+
                 RowFilter = r.RowFilter
             }).ToList();
 
@@ -142,7 +146,6 @@ ORDER BY c.name, t.schema_name, t.table_name;";
                 CopyFromRoleId = permSourceRoleId
             };
         }
-
 
         // ===== 3) EDIT (POST): lưu permission cho role =====
         [HttpPost]
@@ -158,16 +161,15 @@ ORDER BY c.name, t.schema_name, t.table_name;";
 
             try
             {
-                // Xoá hết permission cũ của role
                 const string deleteSql = @"
 DELETE FROM dbo.tbl_cms_table_permission
 WHERE role_id = @roleId;";
 
                 await conn.ExecuteAsync(deleteSql, new { roleId = model.RoleId }, tx);
 
-                // Chèn lại những bảng có flag hoặc row_filter
                 if (model.Items != null && model.Items.Count > 0)
                 {
+                    // ✅ thêm 3 cột vào insert
                     const string insertSql = @"
 INSERT INTO dbo.tbl_cms_table_permission(
     table_id,
@@ -176,6 +178,9 @@ INSERT INTO dbo.tbl_cms_table_permission(
     can_create,
     can_update,
     can_delete,
+    can_publish,
+    can_schedule,
+    can_archive,
     row_filter
 )
 VALUES (
@@ -185,26 +190,36 @@ VALUES (
     @CanCreate,
     @CanUpdate,
     @CanDelete,
+    @CanPublish,
+    @CanSchedule,
+    @CanArchive,
     @RowFilter
 );";
 
                     foreach (var item in model.Items)
                     {
-                        // Nếu không flag nào bật và không có row_filter, bỏ qua => tức là role này không có rule đặc biệt với bảng đó
-                        var hasAny = item.CanView || item.CanCreate || item.CanUpdate || item.CanDelete
-                                     || !string.IsNullOrWhiteSpace(item.RowFilter);
+                        // ✅ hasAny phải tính luôn Publish/Schedule/Archive
+                        var hasAny =
+                            item.CanView || item.CanCreate || item.CanUpdate || item.CanDelete
+                            || item.CanPublish || item.CanSchedule || item.CanArchive
+                            || !string.IsNullOrWhiteSpace(item.RowFilter);
 
-                        if (!hasAny)
-                            continue;
+                        if (!hasAny) continue;
 
                         await conn.ExecuteAsync(insertSql, new
                         {
                             TableId = item.TableId,
                             RoleId = model.RoleId,
+
                             CanView = item.CanView,
                             CanCreate = item.CanCreate,
                             CanUpdate = item.CanUpdate,
                             CanDelete = item.CanDelete,
+
+                            CanPublish = item.CanPublish,
+                            CanSchedule = item.CanSchedule,
+                            CanArchive = item.CanArchive,
+
                             RowFilter = string.IsNullOrWhiteSpace(item.RowFilter) ? null : item.RowFilter
                         }, tx);
                     }
@@ -231,10 +246,7 @@ VALUES (
                 return BadRequest("RoleId không hợp lệ.");
 
             if (fromRoleId == null || fromRoleId <= 0)
-            {
-                // Không chọn role nguồn -> quay lại Edit bình thường
                 return RedirectToAction("Edit", new { roleId });
-            }
 
             var vm = await BuildPermissionViewModelAsync(roleId, permSourceRoleId: fromRoleId);
             if (vm == null)
@@ -243,7 +255,6 @@ VALUES (
             TempData["PermMessage"] = $"Đã nạp quyền từ role ID {fromRoleId}. Nhớ bấm Lưu để ghi xuống DB.";
             return View("Edit", vm);
         }
-
 
         // ===== INDEX THEO BẢNG: filter + highlight bảng "mồ côi" =====
         [HttpGet]
@@ -288,9 +299,7 @@ WHERE t.is_enabled = 1
       )
 ORDER BY c.name, t.schema_name, t.table_name;";
 
-            var items = (await conn.QueryAsync<PermissionTableListItem>(
-                sql,
-                new { connId = connectionId, q }))
+            var items = (await conn.QueryAsync<PermissionTableListItem>(sql, new { connId = connectionId, q }))
                 .ToList();
 
             var vm = new PermissionTableIndexViewModel
@@ -301,8 +310,7 @@ ORDER BY c.name, t.schema_name, t.table_name;";
                 Search = q
             };
 
-            return View(vm); // Views/Permissions/Tables.cshtml
+            return View(vm);
         }
-
     }
 }

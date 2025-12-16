@@ -12,9 +12,18 @@ namespace CmsTools.Services
 {
     public interface IAuditLogger
     {
-        Task LogLoginAsync(HttpContext httpContext, string username, bool isSuccess, string? message = null);
-        Task LogActionAsync(HttpContext httpContext, string action, string? entity = null, long? entityId = null, object? details = null);
+        Task LogLoginAsync(
+            HttpContext httpContext,
+            string username,
+            bool isSuccess,
+            string? message = null);
 
+        Task LogActionAsync(
+            HttpContext httpContext,
+            string action,
+            string? entity = null,
+            long? entityId = null,
+            object? details = null);
     }
 
     public sealed class AuditLogger : IAuditLogger
@@ -59,7 +68,7 @@ namespace CmsTools.Services
         {
             var ip = httpContext.Connection.RemoteIpAddress?.ToString();
 
-            // nếu có X-Forwarded-For (reverse proxy) thì ưu tiên
+            // ưu tiên X-Forwarded-For nếu có proxy
             if (httpContext.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd))
             {
                 var s = fwd.ToString();
@@ -70,17 +79,23 @@ namespace CmsTools.Services
             }
 
             var ua = httpContext.Request.Headers["User-Agent"].ToString();
-            if (ua?.Length > 512)
-                ua = ua.Substring(0, 512);
+            if (!string.IsNullOrEmpty(ua) && ua.Length > 400)
+                ua = ua.Substring(0, 400); // cột NVARCHAR(400)
 
             return (ip, ua);
         }
 
-        public async Task LogLoginAsync(HttpContext httpContext, string username, bool isSuccess, string? message = null)
+        // ===================== LOGIN LOG =====================
+
+        public async Task LogLoginAsync(
+            HttpContext httpContext,
+            string username,
+            bool isSuccess,
+            string? message = null)
         {
             using var conn = OpenMeta();
 
-            var (cmsUserId, currentUsername) = GetCurrentUser(httpContext);
+            var (cmsUserId, _) = GetCurrentUser(httpContext);
             var (ip, ua) = GetRequestInfo(httpContext);
 
             const string sql = @"
@@ -103,7 +118,7 @@ INSERT INTO dbo.tbl_cms_login_log(
             await conn.ExecuteAsync(sql, new
             {
                 CmsUserId = cmsUserId,
-                Username = username,       // username nhập vào form
+                Username = username,       // username nhập ở form login
                 IsSuccess = isSuccess,
                 Ip = ip,
                 UserAgent = ua,
@@ -111,13 +126,21 @@ INSERT INTO dbo.tbl_cms_login_log(
             });
         }
 
-        public async Task LogActionAsync(HttpContext httpContext, string action, string? entity = null, long? entityId = null, object? details = null)
+        // ===================== ACTION AUDIT =====================
+
+        public async Task LogActionAsync(
+            HttpContext httpContext,
+            string action,
+            string? entity = null,
+            long? entityId = null,
+            object? details = null)
         {
             using var conn = OpenMeta();
 
             var (cmsUserId, username) = GetCurrentUser(httpContext);
             var (ip, ua) = GetRequestInfo(httpContext);
 
+            // Serialize details -> new_values
             string? json = null;
             if (details != null)
             {
@@ -131,37 +154,76 @@ INSERT INTO dbo.tbl_cms_login_log(
                 }
             }
 
+            // map sang schema hiện tại của tbl_cms_audit_log
+            // operation: nvarchar(50)
+            var operation = string.IsNullOrWhiteSpace(action)
+                ? "unknown"
+                : action.Trim();
+            if (operation.Length > 50)
+                operation = operation.Substring(0, 50);
+
+            // connection_name: nvarchar(100)
+            var connectionName = "CmsToolsDb";
+
+            // schema_name, table_name
+            var schemaName = "dbo";
+            var tableName = string.IsNullOrWhiteSpace(entity)
+                ? "N/A"
+                : entity.Trim();
+            if (tableName.Length > 128)
+                tableName = tableName.Substring(0, 128);
+
+            // primary key info (nếu có)
+            string? pkColumn = null;
+            string? pkValue = null;
+            if (entityId.HasValue)
+            {
+                pkColumn = "id";
+                pkValue = entityId.Value.ToString();
+                if (pkValue.Length > 256)
+                    pkValue = pkValue.Substring(0, 256);
+            }
+
             const string sql = @"
 INSERT INTO dbo.tbl_cms_audit_log(
-    cms_user_id,
-    username,
-    action,
-    entity,
-    entity_id,
-    details_json,
-    ip,
-    user_agent
+    user_id,
+    operation,
+    connection_name,
+    schema_name,
+    table_name,
+    primary_key_column,
+    primary_key_value,
+    ip_address,
+    user_agent,
+    old_values,
+    new_values
 ) VALUES(
-    @CmsUserId,
-    @Username,
-    @Action,
-    @Entity,
-    @EntityId,
-    @DetailsJson,
-    @Ip,
-    @UserAgent
+    @UserId,
+    @Operation,
+    @ConnectionName,
+    @SchemaName,
+    @TableName,
+    @PrimaryKeyColumn,
+    @PrimaryKeyValue,
+    @IpAddress,
+    @UserAgent,
+    @OldValues,
+    @NewValues
 );";
 
             await conn.ExecuteAsync(sql, new
             {
-                CmsUserId = cmsUserId,
-                Username = username,
-                Action = action,
-                Entity = entity,
-                EntityId = entityId,
-                DetailsJson = json,
-                Ip = ip,
-                UserAgent = ua
+                UserId = cmsUserId,
+                Operation = operation,
+                ConnectionName = connectionName,
+                SchemaName = schemaName,
+                TableName = tableName,
+                PrimaryKeyColumn = pkColumn,
+                PrimaryKeyValue = pkValue,
+                IpAddress = ip,
+                UserAgent = ua,
+                OldValues = (string?)null,   // chưa diff trước/sau
+                NewValues = json            // JSON của details
             });
         }
     }

@@ -23,10 +23,15 @@ namespace CmsTools.Services
         {
             const string sql = @"
 SELECT
-    MAX(CASE WHEN tp.can_view   = 1 THEN 1 ELSE 0 END) AS CanView,
-    MAX(CASE WHEN tp.can_create = 1 THEN 1 ELSE 0 END) AS CanCreate,
-    MAX(CASE WHEN tp.can_update = 1 THEN 1 ELSE 0 END) AS CanUpdate,
-    MAX(CASE WHEN tp.can_delete = 1 THEN 1 ELSE 0 END) AS CanDelete,
+    MAX(CASE WHEN tp.can_view    = 1 THEN 1 ELSE 0 END) AS CanView,
+    MAX(CASE WHEN tp.can_create  = 1 THEN 1 ELSE 0 END) AS CanCreate,
+    MAX(CASE WHEN tp.can_update  = 1 THEN 1 ELSE 0 END) AS CanUpdate,
+    MAX(CASE WHEN tp.can_delete  = 1 THEN 1 ELSE 0 END) AS CanDelete,
+
+    MAX(CASE WHEN tp.can_publish  = 1 THEN 1 ELSE 0 END) AS CanPublish,
+    MAX(CASE WHEN tp.can_schedule = 1 THEN 1 ELSE 0 END) AS CanSchedule,
+    MAX(CASE WHEN tp.can_archive  = 1 THEN 1 ELSE 0 END) AS CanArchive,
+
     MAX(CASE WHEN tp.row_filter IS NULL THEN 0 ELSE 1 END) AS HasRowFilter,
     MAX(tp.row_filter) AS RowFilter
 FROM dbo.tbl_cms_user_role ur
@@ -39,33 +44,69 @@ WHERE ur.user_id = @userId
             var row = await conn.QueryFirstOrDefaultAsync(sql, new { userId, tableId });
 
             if (row == null)
-            {
-                // mặc định: không có quyền gì
-                return new CmsTablePermission
-                {
-                    CanView = false,
-                    CanCreate = false,
-                    CanUpdate = false,
-                    CanDelete = false,
-                    RowFilter = null
-                };
-            }
-
-            // dynamic -> strong type
-            bool canView = row.CanView == 1;
-            bool canCreate = row.CanCreate == 1;
-            bool canUpdate = row.CanUpdate == 1;
-            bool canDelete = row.CanDelete == 1;
-            string? rowFilter = row.HasRowFilter == 1 ? (string?)row.RowFilter : null;
+                return new CmsTablePermission();
 
             return new CmsTablePermission
             {
-                CanView = canView,
-                CanCreate = canCreate,
-                CanUpdate = canUpdate,
-                CanDelete = canDelete,
-                RowFilter = rowFilter
+                CanView = row.CanView == 1,
+                CanCreate = row.CanCreate == 1,
+                CanUpdate = row.CanUpdate == 1,
+                CanDelete = row.CanDelete == 1,
+
+                CanPublish = row.CanPublish == 1,
+                CanSchedule = row.CanSchedule == 1,
+                CanArchive = row.CanArchive == 1,
+
+                RowFilter = row.HasRowFilter == 1 ? (string?)row.RowFilter : null
             };
         }
+
+        public async Task<CmsTablePermission> GetTablePermissionAsync(int userId, string connectionName, string schemaName, string tableName)
+        {
+            const string sql = @"
+SELECT
+    MAX(CASE WHEN tp.can_view    = 1 THEN 1 ELSE 0 END) AS CanView,
+    MAX(CASE WHEN tp.can_create  = 1 THEN 1 ELSE 0 END) AS CanCreate,
+    MAX(CASE WHEN tp.can_update  = 1 THEN 1 ELSE 0 END) AS CanUpdate,
+    MAX(CASE WHEN tp.can_delete  = 1 THEN 1 ELSE 0 END) AS CanDelete,
+
+    MAX(CASE WHEN tp.can_publish  = 1 THEN 1 ELSE 0 END) AS CanPublish,
+    MAX(CASE WHEN tp.can_schedule = 1 THEN 1 ELSE 0 END) AS CanSchedule,
+    MAX(CASE WHEN tp.can_archive  = 1 THEN 1 ELSE 0 END) AS CanArchive,
+
+    MAX(CASE WHEN tp.row_filter IS NULL THEN 0 ELSE 1 END) AS HasRowFilter,
+    MAX(tp.row_filter) AS RowFilter
+FROM dbo.tbl_cms_user_role ur
+JOIN dbo.tbl_cms_role r ON r.id = ur.role_id
+JOIN dbo.tbl_cms_table t ON 1=1
+JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
+LEFT JOIN dbo.tbl_cms_table_permission tp
+    ON tp.role_id = ur.role_id AND tp.table_id = t.id
+WHERE ur.user_id = @userId
+  AND c.name = @connectionName
+  AND t.schema_name = @schemaName
+  AND t.table_name = @tableName;";
+
+            using var conn = OpenMeta();
+            var row = await conn.QueryFirstOrDefaultAsync(sql, new { userId, connectionName, schemaName, tableName });
+
+            if (row == null) return new CmsTablePermission();
+
+            return new CmsTablePermission
+            {
+                CanView = row.CanView == 1,
+                CanCreate = row.CanCreate == 1,
+                CanUpdate = row.CanUpdate == 1,
+                CanDelete = row.CanDelete == 1,
+
+                CanPublish = row.CanPublish == 1,
+                CanSchedule = row.CanSchedule == 1,
+                CanArchive = row.CanArchive == 1,
+
+                RowFilter = row.HasRowFilter == 1 ? (string?)row.RowFilter : null
+            };
+        }
+
+
     }
 }

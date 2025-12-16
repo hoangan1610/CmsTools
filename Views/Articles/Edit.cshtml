@@ -1,0 +1,1421 @@
+﻿@model CmsTools.Models.CmsArticleEditVm
+@using CmsTools.Models
+@using System.Text.Json
+@using System.Text.Encodings.Web
+@{
+    var perm = ViewBag.ArticlePerm as CmsTablePermission ?? new CmsTablePermission();
+}
+
+@{
+    ViewData["Title"] = Model.Id > 0 ? $"Sửa bài #{Model.Id}" : "Tạo bài viết";
+
+    var catIds = Model.Category_Ids ?? new List<long>();
+    var tagIds = Model.Tag_Ids ?? new List<long>();
+
+    var catCsv = string.Join(",", catIds);
+    var tagCsv = string.Join(",", tagIds);
+
+    var initHtmlJs = JsonSerializer.Serialize(
+        Model.Content_Html ?? "",
+        new JsonSerializerOptions { Encoder = JavaScriptEncoder.Default }
+    );
+
+    initHtmlJs = initHtmlJs.Replace("</", "<\\/");
+}
+
+<h3 class="mb-3">@ViewData["Title"]</h3>
+
+@if (TempData["CmsMessage"] != null)
+{
+    <div class="alert alert-success">@TempData["CmsMessage"]</div>
+}
+@if (TempData["CmsError"] != null)
+{
+    <div class="alert alert-danger">@TempData["CmsError"]</div>
+}
+
+<form id="articleForm" method="post" asp-action="Save" onsubmit="return onBeforeSubmit(event);">
+    @Html.AntiForgeryToken()
+
+    <input type="hidden" name="id" id="article_id" value="@Model.Id" />
+
+    <input type="hidden" name="content_html" id="content_html" />
+    <input type="hidden" name="action" id="action_hidden" value="" />
+
+    <input type="hidden" name="category_ids_csv" id="category_ids_csv" value="@catCsv" />
+    <input type="hidden" name="tag_ids_csv" id="tag_ids_csv" value="@tagCsv" />
+    <input type="hidden" name="cards_json" id="cards_json" />
+    <input type="hidden" name="scheduled_at_vn" id="scheduled_at_vn" />
+
+    <!-- ✅ NEW: concurrency token -->
+    <input type="hidden" name="concurrency_token" id="concurrency_token" value="@(Model.Concurrency_Token ?? "")" />
+
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <!-- ✅ NEW: Save state bar -->
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="small">
+                    <span id="saveStateBadge" class="badge bg-secondary">Chưa lưu</span>
+                    <span id="saveStateText" class="text-muted ms-2"></span>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="manualSaveDraft()">Lưu nháp (không reload)</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openPreviewHtml()">Xem trước</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyHtml()">Copy HTML</button>
+                </div>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Title</label>
+                <input id="titleInput" class="form-control" name="title" value="@Model.Title" required />
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label d-flex align-items-center justify-content-between">
+                    <span>Slug</span>
+                    <span class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="regenSlugFromTitle()">Tạo lại slug</button>
+                    </span>
+                </label>
+                <input id="slugInput" class="form-control" name="slug" value="@Model.Slug" placeholder="tu-dong-tao-neu-bo-trong" />
+                <div id="slugHelp" class="small mt-1"></div>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Excerpt</label>
+                <textarea class="form-control" name="excerpt" rows="2">@Model.Excerpt</textarea>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Cover Image URL</label>
+                <input class="form-control" name="cover_image_url" value="@Model.Cover_Image_Url" />
+            </div>
+
+            <div class="mb-2 d-flex align-items-center justify-content-between">
+                <label class="form-label mb-0">Nội dung bài viết (Word-like)</label>
+                <small class="text-muted">Copy Word → paste. Ảnh: nút Image để upload.</small>
+            </div>
+
+            <textarea id="editor_html" class="form-control" rows="18"></textarea>
+
+            <hr class="my-4" />
+
+            <h5 class="mb-2">Product cards cuối bài</h5>
+
+            <div class="input-group mb-2">
+                <input id="prod-q" class="form-control" placeholder="Tìm sản phẩm (tối thiểu 2 ký tự)..." />
+                <button class="btn btn-outline-secondary" type="button" onclick="searchProducts()">Tìm</button>
+            </div>
+
+            <div id="prod-results" class="list-group mb-3"></div>
+
+            <div class="border rounded p-2">
+                <div class="small text-muted mb-2">Danh sách card (kéo để sắp xếp)</div>
+                <div id="cards-list" class="list-group">
+                    @foreach (var c in (Model.Cards ?? new List<CmsArticleCardVm>()).OrderBy(x => x.Sort_Order))
+                    {
+                        <div class="list-group-item d-flex align-items-center gap-2"
+                             data-product-id="@c.Product_Id"
+                             data-variant-id="@(c.Variant_Id?.ToString() ?? "")"
+                             data-product-name="@c.Product_Name"
+                             data-product-image="@c.Product_Image"
+                             data-variant-name="@(c.Variant_Name ?? "")"
+                             data-retail-price="@(c.Retail_Price?.ToString() ?? "")"
+                             data-stock="@(c.Stock?.ToString() ?? "")">
+
+                            <span class="badge bg-secondary" style="cursor:grab">↕</span>
+                            <img src="@c.Product_Image" style="width:40px;height:40px;object-fit:cover;border-radius:8px;" />
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold">@c.Product_Name</div>
+                                <div class="small text-muted">
+                                    Variant: @(c.Variant_Name ?? "(none)")
+                                    @if (c.Retail_Price != null)
+                                    {
+                                        <span class="ms-2">| Giá: @c.Retail_Price</span>
+                                    }
+                                    @if (c.Stock != null)
+                                    {
+                                        <span class="ms-2">| Tồn: @c.Stock</span>
+                                    }
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeCard(this)">X</button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="border rounded p-3">
+                <h6>Category</h6>
+                <select id="cat-select" class="form-select" multiple size="6" onchange="syncCats()">
+                    @if ((Model.Category_Options?.Count ?? 0) == 0)
+                    {
+                        <option disabled>(Chưa có category — hãy tạo dữ liệu)</option>
+                    }
+                    else
+                    {
+                        foreach (var c in Model.Category_Options!)
+                        {
+                            var isSel = (Model.Category_Ids ?? new List<long>()).Contains(c.Id);
+                            <option value="@c.Id" selected="@(isSel ? "selected" : null)">@c.Name</option>
+                        }
+                    }
+                </select>
+
+
+                <hr />
+
+                <h6>Tag</h6>
+                <select id="tag-select" class="form-select" multiple size="8" onchange="syncTags()">
+                    @if ((Model.Tag_Options?.Count ?? 0) == 0)
+                    {
+                        <option disabled>(Chưa có tag — hãy tạo dữ liệu)</option>
+                    }
+                    else
+                    {
+                        foreach (var t in Model.Tag_Options!)
+                        {
+                            var isSel = (Model.Tag_Ids ?? new List<long>()).Contains(t.Id);
+                            <option value="@t.Id" selected="@(isSel ? "selected" : null)">@t.Name</option>
+                        }
+                    }
+                </select>
+
+
+                <hr />
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="is_featured" value="true" @(Model.Is_Featured ? "checked" : null) />
+                    <label class="form-check-label">Show homepage</label>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label">Featured order</label>
+                    <input class="form-control" type="number" name="featured_order" value="@(Model.Featured_Order?.ToString() ?? "")" />
+                </div>
+
+                <hr />
+
+                <h6>SEO</h6>
+                <div class="mb-2">
+                    <label class="form-label">Meta title</label>
+                    <input class="form-control" name="meta_title" value="@Model.Meta_Title" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Meta description</label>
+                    <textarea class="form-control" name="meta_description" rows="2">@Model.Meta_Description</textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">OG image</label>
+                    <input class="form-control" name="og_image_url" value="@Model.Og_Image_Url" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Canonical</label>
+                    <input class="form-control" name="canonical_url" value="@Model.Canonical_Url" />
+                </div>
+
+                <hr />
+
+                
+
+                <div class="d-grid gap-2">
+                    @if (perm.CanCreate || perm.CanUpdate)
+                    {
+                        <button class="btn btn-primary" type="submit" data-action="SaveDraft">Lưu nháp</button>
+                    }
+
+                    @if (perm.CanPublish)
+                    {
+                        <button class="btn btn-success" type="submit" data-action="Publish">Đăng ngay</button>
+                    }
+
+                    @if (perm.CanSchedule)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Schedule (giờ VN)</label>
+                            <input id="schedule_vn" class="form-control" type="datetime-local"
+                                   value="@(Model.Scheduled_At_Vn?.ToString("yyyy-MM-ddTHH:mm") ?? "")" />
+                            <div class="small text-muted mt-1" id="scheduleHint"></div>
+                        </div>
+
+                        <button class="btn btn-warning" type="submit" data-action="Schedule">Hẹn giờ đăng</button>
+                    }
+
+
+
+                    @if (perm.CanArchive)
+                    {
+                        <button class="btn btn-outline-secondary" type="submit" data-action="Archive">Lưu trữ</button>
+                    }
+                </div>
+
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- Variant Modal -->
+<div class="modal fade" id="variantModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Chọn phân loại</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="variantModalBody" class="list-group"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Preview Modal -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Xem trước bài viết</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <iframe id="previewFrame" style="width:100%;height:70vh;border:1px solid #e5e7eb;border-radius:12px;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tinymce@6/tinymce.min.js"></script>
+
+    <script>
+            // ===== endpoints =====
+            const PRODUCT_SEARCH_URL = '/Articles/SearchProducts';
+            const VARIANTS_URL = '/Articles/GetVariants';
+            const UPLOAD_IMAGE_URL = '/Articles/UploadEditorImage';
+
+            const AUTOSAVE_URL = '/Articles/AutoSaveDraft';
+            const CHECK_SLUG_URL = '/Articles/CheckSlug';
+
+                    const PERM = {
+          canCreate: @((perm.CanCreate).ToString().ToLower()),
+          canUpdate: @((perm.CanUpdate).ToString().ToLower()),
+          canPublish: @((perm.CanPublish).ToString().ToLower()),
+          canSchedule: @((perm.CanSchedule).ToString().ToLower()),
+          canArchive: @((perm.CanArchive).ToString().ToLower()),
+        };
+
+
+            // ✅ CSS frontend thật (đổi sang link public của HAFoodWeb nếu có)
+                    const FRONTEND_CSS_URL = ''; // không cần nữa vì ta inline style y như HAFoodWeb
+
+        const FRONTEND_PREVIEW_STYLE = `
+        <style>
+          :root{
+            --ha-cream:#FFF7EA;
+            --ha-ink:#0f172a;
+            --ha-muted:#64748b;
+            --ha-accent:#22c55e;
+            --ha-border: rgba(148,163,184,.28);
+            --ha-shadow: 0 20px 60px rgba(15,23,42,.10);
+            --ha-shadow-sm: 0 10px 28px rgba(15,23,42,.10);
+            --ha-radius: 18px;
+          }
+
+          html, body{ height:100%; }
+          body{
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", sans-serif;
+            color: var(--ha-ink);
+            background:
+              radial-gradient(900px 420px at 20% 0%, rgba(34,197,94,.10), transparent 55%),
+              linear-gradient(180deg, var(--ha-cream) 0%, #fff 35%, #f6f7fb 100%);
+          }
+
+          .read-progress{
+            position: sticky;
+            top: 0;
+            z-index: 9998;
+            height: 3px;
+            background: transparent;
+          }
+          .read-progress > span{
+            display:block;
+            height: 3px;
+            width: 0%;
+            background: var(--ha-accent);
+            box-shadow: 0 0 0 1px rgba(34,197,94,.10);
+            transition: width .08s linear;
+          }
+
+          .ha-shell{
+            max-width: 1140px;
+            margin: 0 auto;
+            padding: 18px 12px 0;
+          }
+
+          .ha-back{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            color: var(--ha-ink);
+            text-decoration:none;
+            font-weight: 700;
+          }
+          .ha-back:hover{ color: var(--ha-accent); }
+
+          .ha-hero{
+            border-radius: var(--ha-radius);
+            background:#fff;
+            border: 1px solid var(--ha-border);
+            box-shadow: var(--ha-shadow);
+            overflow:hidden;
+          }
+
+          .ha-coverwrap{
+            position: relative;
+            background:#f1f5f9;
+            min-height: 220px;
+          }
+          .ha-cover{
+            width:100%;
+            max-height: 420px;
+            object-fit: cover;
+            display:block;
+          }
+          .ha-coverfade{
+            position:absolute; inset:auto 0 0 0;
+            height: 130px;
+            background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,.40) 100%);
+            pointer-events:none;
+          }
+
+          .ha-hero-inner{ padding: 14px 16px 16px; }
+                  @@media(min-width:992px){
+          .ha-hero-inner{ padding: 18px 22px 20px; }
+        }
+
+          .ha-title{
+            font-weight: 900;
+            letter-spacing: -.02em;
+            line-height: 1.16;
+            margin: 0;
+            font-size: 1.65rem;
+          }
+          @@media(min-width:992px){ .ha-title{ font-size: 2.05rem; } }
+
+          .ha-excerpt{
+            margin-top: 10px;
+            color: var(--ha-muted);
+            font-size: 0.98rem;
+            line-height: 1.55;
+          }
+
+          .ha-meta{
+            margin-top: 12px;
+            display:flex;
+            flex-wrap:wrap;
+            gap: 8px;
+            align-items:center;
+            color: var(--ha-muted);
+            font-size: 13px;
+          }
+          .ha-chip{
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(15,23,42,.04);
+            border: 1px solid rgba(148,163,184,.25);
+            color: #0f172a;
+            font-weight: 700;
+          }
+          .ha-chip i{ color: var(--ha-accent); }
+
+          .ha-actions{
+            margin-left:auto;
+            display:flex;
+            align-items:center;
+            gap: 8px;
+          }
+          .ha-btn-icon{
+            border: 1px solid rgba(148,163,184,.25);
+            background:#fff;
+            border-radius: 999px;
+            height: 36px;
+            width: 36px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            box-shadow: 0 8px 18px rgba(15,23,42,.06);
+            cursor:pointer;
+            transition: transform .12s ease, box-shadow .12s ease;
+          }
+          .ha-btn-icon:hover{ transform: translateY(-1px); box-shadow: 0 14px 26px rgba(15,23,42,.10); }
+          .ha-btn-icon i{ font-size: 16px; color:#0f172a; }
+
+          .ha-layout{ margin-top: 14px; }
+
+          .blog-content{
+            background:#fff;
+            border: 1px solid var(--ha-border);
+            border-radius: var(--ha-radius);
+            box-shadow: var(--ha-shadow-sm);
+            padding: 18px;
+          }
+                 @@media(min-width:992px){
+          .blog-content{ padding: 26px; }
+        }
+
+          .prose{ max-width: 760px; margin: 0 auto; }
+          .blog-content h2, .blog-content h3, .blog-content h4{
+            margin-top: 18px;
+            font-weight: 900;
+            letter-spacing: -.01em;
+          }
+          .blog-content p{
+            line-height: 1.85;
+            font-size: 1.02rem;
+            color: #0f172a;
+          }
+          .blog-content a{ color: #16a34a; font-weight: 700; }
+          .blog-content a:hover{ text-decoration: underline; }
+
+          .blog-content img{
+            max-width:100%;
+            height:auto;
+            border-radius: 14px;
+            border: 1px solid rgba(148,163,184,.25);
+            box-shadow: 0 12px 28px rgba(15,23,42,.08);
+          }
+          .blog-content blockquote{
+            padding: 14px 14px;
+            border-left: 4px solid var(--ha-accent);
+            background: rgba(34,197,94,.08);
+            border-radius: 14px;
+            margin: 16px 0;
+            color:#0f172a;
+          }
+          .blog-content ul, .blog-content ol{ padding-left: 1.15rem; }
+          .blog-content li{ line-height: 1.75; margin: 6px 0; }
+
+                  @@media(min-width:992px){
+          .ha-aside-sticky{ position: sticky; top: 14px; }
+        }
+
+          .ha-sidecard{
+            background:#fff;
+            border: 1px solid var(--ha-border);
+            border-radius: var(--ha-radius);
+            box-shadow: var(--ha-shadow-sm);
+            overflow:hidden;
+          }
+          .ha-sidecard .ha-sidehead{
+            padding: 12px 14px;
+            font-weight: 900;
+            border-bottom: 1px solid rgba(148,163,184,.18);
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+          }
+          .ha-sidecard .ha-sidebody{ padding: 12px; }
+
+          .ha-card-img{ height:170px; object-fit:cover; border-bottom:1px solid rgba(148,163,184,.18); }
+          .ha-price{ font-weight: 900; }
+          .ha-card{
+            border: 1px solid rgba(148,163,184,.20);
+            border-radius: 16px;
+            overflow:hidden;
+            box-shadow: 0 10px 22px rgba(15,23,42,.08);
+            transition: transform .12s ease, box-shadow .12s ease;
+            background:#fff;
+          }
+          .ha-card:hover{ transform: translateY(-2px); box-shadow: 0 18px 38px rgba(15,23,42,.12); }
+
+          .line-2{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        </style>
+        `;
+         // <-- đổi
+            // ✅ link product frontend (optional)
+                   const PRODUCT_URL_TEMPLATE = 'https://localhost:44336/Product/Product.aspx?id={id}';
+
+        // <-- đổi nếu bạn có slug
+
+            const initHtml = @Html.Raw(initHtmlJs);
+
+            // ===== helpers: get/set article id =====
+            function getArticleId() {
+                const el = document.getElementById('article_id') || document.querySelector('#articleForm input[name="id"]');
+                const v = el ? Number(el.value || '0') : 0;
+                return Number.isFinite(v) ? v : 0;
+            }
+            function setArticleId(id) {
+                const el = document.getElementById('article_id') || document.querySelector('#articleForm input[name="id"]');
+                if (el) el.value = String(id || 0);
+            }
+
+            function getAntiForgeryToken() {
+                const tokenEl = document.querySelector('#articleForm input[name="__RequestVerificationToken"]');
+                return tokenEl ? tokenEl.value : '';
+            }
+
+            function getEditorHtml() {
+                const ed = (window.tinymce && tinymce.get('editor_html')) ? tinymce.get('editor_html') : null;
+                return ed ? (ed.getContent() || '') : (document.getElementById('editor_html')?.value || '');
+            }
+
+            function debounce(fn, wait) {
+                let t = null;
+                return function (...args) {
+                    clearTimeout(t);
+                    t = setTimeout(() => fn.apply(this, args), wait);
+                };
+            }
+
+            // ===== save state =====
+            let _dirty = false;
+            let _autosaveTimer = null;
+            let _autosaveInFlight = false;
+            let _lastSavedAt = null;
+
+            function setDirty(v) { _dirty = !!v; renderSaveState(); }
+
+            function renderSaveState() {
+                const badge = document.getElementById('saveStateBadge');
+                const text = document.getElementById('saveStateText');
+                if (!badge || !text) return;
+
+                if (_autosaveInFlight) {
+                    badge.className = 'badge bg-info';
+                    badge.textContent = 'Đang lưu...';
+                    text.textContent = '';
+                    return;
+                }
+                if (_dirty) {
+                    badge.className = 'badge bg-secondary';
+                    badge.textContent = 'Chưa lưu';
+                    text.textContent = 'Bạn đang chỉnh sửa...';
+                    return;
+                }
+                badge.className = 'badge bg-success';
+                badge.textContent = 'Đã lưu';
+                text.textContent = _lastSavedAt ? ('Lúc ' + _lastSavedAt) : '';
+            }
+
+            // ===== cat/tag sync =====
+            function syncCats() {
+                const sel = document.getElementById('cat-select');
+                const ids = [...sel.selectedOptions].map(o => o.value);
+                document.getElementById('category_ids_csv').value = ids.join(',');
+            }
+            function syncTags() {
+                const sel = document.getElementById('tag-select');
+                const ids = [...sel.selectedOptions].map(o => o.value);
+                document.getElementById('tag_ids_csv').value = ids.join(',');
+            }
+
+            // ===== slugify client =====
+            function slugifyClient(str) {
+                str = (str || '').trim().toLowerCase();
+                str = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                str = str.replace(/đ/g, 'd');
+                str = str.replace(/[^a-z0-9\s-]/g, '');
+                str = str.replace(/\s+/g, ' ').trim();
+                str = str.replaceAll(' ', '-');
+                str = str.replace(/-+/g, '-').replace(/^-|-$/g, '');
+                return str || 'bai-viet';
+            }
+
+            function regenSlugFromTitle() {
+                const title = document.getElementById('titleInput')?.value || '';
+                const slugInput = document.getElementById('slugInput');
+                if (!slugInput) return;
+                slugInput.value = slugifyClient(title);
+                setDirty(true);
+                checkSlugUnique();
+            }
+
+            async function checkSlugUnique() {
+                const slugInput = document.getElementById('slugInput');
+                const help = document.getElementById('slugHelp');
+                if (!slugInput || !help) return;
+
+                const slug = (slugInput.value || '').trim();
+                if (!slug) { help.innerHTML = ''; return; }
+
+                help.className = 'small mt-1 text-muted';
+                help.textContent = 'Đang kiểm tra slug...';
+
+                const id = getArticleId(); // ✅ dùng id hiện tại
+                const url = `${CHECK_SLUG_URL}?id=${encodeURIComponent(id)}&slug=${encodeURIComponent(slug)}`;
+
+                const resp = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).catch(() => null);
+                const data = resp ? await resp.json().catch(() => null) : null;
+
+                if (!resp || !data) {
+                    help.className = 'small mt-1 text-warning';
+                    help.textContent = 'Không kiểm tra được slug (network).';
+                    return;
+                }
+                if (data.ok === true) {
+                    help.className = 'small mt-1 text-success';
+                    help.textContent = 'Slug hợp lệ.';
+                } else {
+                    help.className = 'small mt-1 text-danger';
+                    help.textContent = data.message || 'Slug đã tồn tại.';
+                }
+            }
+
+            // ===== before unload =====
+            window.addEventListener('beforeunload', function (e) {
+                if (!_dirty) return;
+                e.preventDefault();
+                e.returnValue = '';
+            });
+
+            // ===== autosave =====
+            function scheduleAutosaveSoon() {
+                if (_autosaveTimer) clearTimeout(_autosaveTimer);
+                _autosaveTimer = setTimeout(() => { autoSaveDraft().catch(() => { }); }, 8000);
+            }
+            async function manualSaveDraft() { await autoSaveDraft(true); }
+
+            async function autoSaveDraft(isManual = false) {
+                if (_autosaveInFlight) return;
+                if (!isManual && !_dirty) return;
+
+                const title = (document.getElementById('titleInput')?.value || '').trim();
+                if (!title) return;
+
+                _autosaveInFlight = true;
+                renderSaveState();
+
+                const token = getAntiForgeryToken();
+                const fd = new FormData();
+
+                // ✅ IMPORTANT: lấy id hiện tại từ hidden input
+                fd.append('id', String(getArticleId()));
+
+                fd.append('title', title);
+                fd.append('slug', (document.getElementById('slugInput')?.value || '').trim());
+                fd.append('excerpt', (document.querySelector('textarea[name="excerpt"]')?.value || '').trim());
+                fd.append('cover_image_url', (document.querySelector('input[name="cover_image_url"]')?.value || '').trim());
+                fd.append('content_html', getEditorHtml());
+                fd.append('is_featured', (document.querySelector('input[name="is_featured"]')?.checked ? 'true' : 'false'));
+                fd.append('featured_order', (document.querySelector('input[name="featured_order"]')?.value || '').trim());
+                fd.append('meta_title', (document.querySelector('input[name="meta_title"]')?.value || '').trim());
+                fd.append('meta_description', (document.querySelector('textarea[name="meta_description"]')?.value || '').trim());
+                fd.append('og_image_url', (document.querySelector('input[name="og_image_url"]')?.value || '').trim());
+                fd.append('canonical_url', (document.querySelector('input[name="canonical_url"]')?.value || '').trim());
+                fd.append('category_ids_csv', (document.getElementById('category_ids_csv')?.value || ''));
+                fd.append('tag_ids_csv', (document.getElementById('tag_ids_csv')?.value || ''));
+                fd.append('cards_json', buildCardsJson());
+                fd.append('scheduled_at_vn', (document.getElementById('schedule_vn')?.value || ''));
+                fd.append('concurrency_token', (document.getElementById('concurrency_token')?.value || ''));
+
+                const resp = await fetch(AUTOSAVE_URL, {
+                    method: 'POST',
+                    body: fd,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        ...(token ? { 'RequestVerificationToken': token } : {})
+                    }
+                }).catch(() => null);
+
+                const json = resp ? await resp.json().catch(() => null) : null;
+                _autosaveInFlight = false;
+
+                if (!resp || !json) {
+                    renderSaveState();
+                    if (isManual) alert('Không lưu nháp được (network).');
+                    return;
+                }
+                if (!resp.ok || json.ok !== true) {
+                    renderSaveState();
+                    if (resp.status === 409) {
+                        alert(json.message || 'Bị xung đột dữ liệu. Hãy reload trang.');
+                    } else if (isManual) {
+                        alert(json.message || 'Lưu nháp thất bại.');
+                    }
+                    return;
+                }
+
+                // ✅ nếu server trả id mới: update hidden id + URL
+                if (json.id) {
+                    const newId = Number(json.id);
+                    if (newId > 0 && newId !== getArticleId()) {
+                        setArticleId(newId);
+                        const newUrl = `/Articles/Edit?id=${newId}`;
+                        window.history.replaceState({}, '', newUrl);
+                    }
+                }
+
+                if (json.concurrency_token) {
+                    document.getElementById('concurrency_token').value = json.concurrency_token;
+                }
+
+                _lastSavedAt = json.saved_at_local || '';
+                setDirty(false);
+                renderSaveState();
+            }
+
+            function buildCardsJson() {
+                const list = document.getElementById('cards-list');
+                const arr = [...(list?.children || [])].map((el, idx) => ({
+                    product_id: Number(el.getAttribute('data-product-id')),
+                    variant_id: (el.getAttribute('data-variant-id') || '') ? Number(el.getAttribute('data-variant-id')) : null,
+                    sort_order: idx + 1
+                }));
+                return JSON.stringify(arr);
+            }
+
+            // ===== UX: chặn double submit =====
+            function lockSubmitButtons(lock) {
+                document.querySelectorAll('#articleForm button[type="submit"]').forEach(b => {
+                    b.disabled = !!lock;
+                });
+            }
+
+            // ===== Preview: build cards html =====
+                            function buildCardsPreviewHtml() {
+          const list = document.getElementById('cards-list');
+          const items = [...(list?.children || [])];
+          if (items.length === 0) return '';
+
+          const cards = items.map(el => {
+            const pid = el.getAttribute('data-product-id') || '';
+            const vid = el.getAttribute('data-variant-id') || '';
+            const name = el.getAttribute('data-product-name') || '';
+            const img = el.getAttribute('data-product-image') || '';
+            const vname = el.getAttribute('data-variant-name') || '';
+            const price = el.getAttribute('data-retail-price') || '';
+            const stock = el.getAttribute('data-stock') || '';
+
+            const url = PRODUCT_URL_TEMPLATE.replace('{id}', encodeURIComponent(pid));
+
+            return `
+              <div class="col-12">
+                <div class="ha-card">
+                  <a class="text-decoration-none" href="${url}" target="_blank" rel="noopener noreferrer">
+                    ${img
+                      ? `<img class="ha-card-img w-100" src="${img}" alt="" loading="lazy" />`
+                      : `<div class="ha-card-img w-100" style="background:#f1f5f9"></div>`
+                    }
+                  </a>
+
+                  <div class="p-3">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                      <a class="text-decoration-none" href="${url}" target="_blank" rel="noopener noreferrer">
+                        <div class="fw-semibold line-2" style="color:#0f172a">${escapeHtml(name)}</div>
+                      </a>
+                      <span class="badge bg-secondary">#${escapeHtml(pid)}${vid ? ` / V${escapeHtml(vid)}` : ''}</span>
+                    </div>
+
+                    <div class="small text-muted mt-2">
+                      Phân loại: <b>${escapeHtml(vname || '(none)')}</b>
+                      ${price ? ` | Giá: <b>${escapeHtml(price)}</b>` : ``}
+                      ${stock ? ` | Tồn: <b>${escapeHtml(stock)}</b>` : ``}
+                    </div>
+
+                    <div class="mt-2 d-grid gap-2">
+                      <a class="btn btn-outline-secondary btn-sm" href="${url}" target="_blank" rel="noopener noreferrer">Xem chi tiết</a>
+                      <button type="button" class="btn btn-success btn-sm" disabled>Thêm vào giỏ (preview)</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          return `
+            <div class="ha-sidecard">
+              <div class="ha-sidehead"><span>Gợi ý sản phẩm</span></div>
+              <div class="ha-sidebody">
+                <div class="row g-2">${cards}</div>
+              </div>
+            </div>
+          `;
+        }
+
+
+
+            document.addEventListener('DOMContentLoaded', function () {
+                syncCats();
+                syncTags();
+
+                const cardsList = document.getElementById('cards-list');
+                if (cardsList && window.Sortable) new Sortable(cardsList, { animation: 150, handle: '.badge' });
+
+                const q = document.getElementById('prod-q');
+                if (q) q.addEventListener('input', debounce(searchProducts, 250));
+
+                const titleInput = document.getElementById('titleInput');
+                const slugInput = document.getElementById('slugInput');
+                if (titleInput && slugInput) {
+                    titleInput.addEventListener('blur', () => {
+                        if (!(slugInput.value || '').trim()) {
+                            slugInput.value = slugifyClient(titleInput.value || '');
+                            checkSlugUnique();
+                        }
+                    });
+                    titleInput.addEventListener('input', () => { setDirty(true); scheduleAutosaveSoon(); });
+                    slugInput.addEventListener('input', () => { setDirty(true); scheduleAutosaveSoon(); });
+                    slugInput.addEventListener('blur', () => { checkSlugUnique(); });
+                }
+
+                document.querySelectorAll('#articleForm input, #articleForm textarea, #articleForm select')
+                    .forEach(el => {
+                        el.addEventListener('change', () => { setDirty(true); scheduleAutosaveSoon(); });
+                        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                            el.addEventListener('input', () => { setDirty(true); scheduleAutosaveSoon(); });
+                        }
+                    });
+
+                // schedule hint + client validate basic
+                       const sch = document.getElementById('schedule_vn');
+        const hint = document.getElementById('scheduleHint');
+        if (sch && hint) {
+          const renderHint = () => {
+            const v = sch.value || '';
+            if (!v) { hint.textContent = ''; return; }
+            const utcMs = parseVnLocalToUtcMs(v);
+            if (!utcMs) { hint.textContent = 'Schedule không hợp lệ.'; return; }
+            hint.textContent = `Sẽ đăng lúc (giờ VN): ${formatUtcMsToVn(utcMs)} (UTC: ${new Date(utcMs).toISOString()})`;
+          };
+          sch.addEventListener('change', () => { setDirty(true); scheduleAutosaveSoon(); renderHint(); });
+          renderHint();
+        }
+
+
+                if (!window.tinymce) return;
+
+                tinymce.init({
+                    selector: '#editor_html',
+                    height: 520,
+                    menubar: true,
+                    branding: false,
+                    plugins: [
+                        'lists', 'link', 'image', 'table', 'code', 'preview', 'wordcount', 'searchreplace',
+                        'autolink', 'charmap', 'fullscreen', 'paste'
+                    ],
+                    toolbar: [
+                        'undo redo | blocks | bold italic underline strikethrough | alignleft aligncenter alignright alignjustify',
+                        'bullist numlist outdent indent | link image table | removeformat | code fullscreen'
+                    ].join(' | '),
+
+                    paste_data_images: false,
+                    paste_remove_styles_if_webkit: true,
+
+                    setup: (ed) => {
+                        ed.on('init', () => {
+                            ed.setContent(initHtml || '');
+                            setDirty(false);
+                            renderSaveState();
+                        });
+                        ed.on('change input undo redo', () => {
+                            setDirty(true);
+                            scheduleAutosaveSoon();
+                        });
+                    },
+
+                    images_upload_handler: async (blobInfo) => {
+                        const formData = new FormData();
+                        formData.append('image', blobInfo.blob(), blobInfo.filename());
+
+                        const token = getAntiForgeryToken();
+                        const resp = await fetch(UPLOAD_IMAGE_URL, {
+                            method: 'POST',
+                            body: formData,
+                            headers: {
+                                'X-Requested-With': 'XMLHttpRequest',
+                                ...(token ? { 'RequestVerificationToken': token } : {})
+                            }
+                        });
+
+                        const json = await resp.json().catch(() => null);
+                        if (!resp.ok) throw new Error(json?.message || 'Upload failed');
+
+                        const url = json?.location || json?.file?.url;
+                        if (!url) throw new Error('Upload response invalid');
+                        return url;
+                    }
+                });
+
+                // autosave interval (2 phút)
+                setInterval(() => { autoSaveDraft().catch(() => { }); }, 120000);
+            });
+
+            async function copyHtml() {
+                const html = getEditorHtml();
+                try {
+                    await navigator.clipboard.writeText(html);
+                    alert("Đã copy HTML.");
+                } catch {
+                    const tmp = document.createElement('textarea');
+                    tmp.value = html;
+                    tmp.style.position = 'fixed';
+                    tmp.style.left = '-9999px';
+                    document.body.appendChild(tmp);
+                    tmp.select();
+                    document.execCommand('copy');
+                    tmp.remove();
+                    alert("Đã copy HTML (fallback).");
+                }
+            }
+
+                    function stripScripts(html) {
+          // tránh case dán nhầm script vào editor gây chạy trong preview
+          return (html || '').replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+        }
+
+        function calcReadTime(html) {
+          const text = stripScripts(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          const words = text ? text.split(' ').length : 0;
+          const mins = Math.max(1, Math.round(words / 200));
+          return `${mins} phút đọc`;
+        }
+
+                function openPreviewHtml() {
+          const htmlRaw = getEditorHtml();
+          const html = stripScripts(htmlRaw);
+
+          const cardsHtml = buildCardsPreviewHtml();
+
+          const title = (document.getElementById('titleInput')?.value || 'Bài viết - HAFood').trim();
+          const excerpt = (document.querySelector('textarea[name="excerpt"]')?.value || '').trim();
+          const cover = (document.querySelector('input[name="cover_image_url"]')?.value || '').trim();
+
+          const now = new Date();
+          const metaDate = now.toLocaleDateString('vi-VN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+          const readTime = calcReadTime(html);
+
+          // ✅ FIX Razor TagHelper: không để literal "<body>" trong .cshtml
+          const BODY_START = '<bo' + 'dy>';
+
+          // né dotnet watch match
+          const END = '</bo' + 'dy></htm' + 'l>';
+          const SCRIPT_END = '</scr' + 'ipt>';
+
+          const doc = `
+        <!doctype html>
+        <html lang="vi">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+          <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+          ${FRONTEND_CSS_URL ? `<link href="${FRONTEND_CSS_URL}" rel="stylesheet">` : ``}
+          ${FRONTEND_PREVIEW_STYLE}
+        </head>
+
+        ${BODY_START}
+          <div class="read-progress" aria-hidden="true"><span id="readProgressBar"></span></div>
+
+          <div class="ha-shell">
+            <a href="javascript:void(0)" class="ha-back"><i class="bi bi-arrow-left"></i> Quay lại blog (preview)</a>
+
+            <div class="ha-hero mt-2">
+              <div class="ha-coverwrap">
+                ${cover ? `<img class="ha-cover" src="${cover}" alt="" onerror="this.style.display='none';" />` : ``}
+                <div class="ha-coverfade"></div>
+              </div>
+
+              <div class="ha-hero-inner">
+                <h1 class="ha-title">${escapeHtml(title)}</h1>
+
+                ${excerpt ? `<div class="ha-excerpt">${escapeHtml(excerpt)}</div>` : ``}
+
+                <div class="ha-meta">
+                  <span class="ha-chip"><i class="bi bi-calendar2-week"></i> ${escapeHtml(metaDate)}</span>
+                  <span class="ha-chip"><i class="bi bi-clock-history"></i> ${escapeHtml(readTime)}</span>
+
+                  <div class="ha-actions">
+                    <button type="button" class="ha-btn-icon" id="btnCopyLink" title="Copy link" disabled>
+                      <i class="bi bi-link-45deg"></i>
+                    </button>
+                    <a class="ha-btn-icon" id="btnShareFb" target="_blank" rel="noopener"
+                       title="Share Facebook" href="#" aria-disabled="true"
+                       style="pointer-events:none;opacity:.6">
+                      <i class="bi bi-facebook"></i>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ha-layout mt-3">
+              <div class="row g-3 align-items-start">
+                <div class="col-12 col-lg-8">
+                  <div class="blog-content">
+                    <div class="prose">
+                      ${html || '<div class="text-muted">Chưa có nội dung.</div>'}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="col-12 col-lg-4">
+                  <div class="ha-aside-sticky">
+                    ${cardsHtml || ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <script>
+            (function(){
+              function qs(s){ return document.querySelector(s); }
+              function updateReadProgress(){
+                var bar = qs('#readProgressBar');
+                if(!bar) return;
+                var doc = document.documentElement;
+                var scrollTop = window.pageYOffset || doc.scrollTop || 0;
+                var scrollHeight = (doc.scrollHeight||0) - (doc.clientHeight||1);
+                var p = scrollHeight>0 ? Math.max(0, Math.min(1, scrollTop/scrollHeight)) : 0;
+                bar.style.width = (p*100).toFixed(2) + '%';
+              }
+              window.addEventListener('scroll', updateReadProgress, {passive:true});
+              window.addEventListener('resize', updateReadProgress);
+              setTimeout(updateReadProgress, 0);
+            })();
+          ${SCRIPT_END}
+
+        ${END}
+        `;
+
+          const frame = document.getElementById('previewFrame');
+          frame.srcdoc = doc;
+
+          if (window.bootstrap?.Modal) {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('previewModal')).show();
+          } else {
+            const w = window.open('', '_blank');
+            if (w) { w.document.open(); w.document.write(doc); w.document.close(); }
+          }
+        }
+
+
+
+            let _searchAbort = null;
+
+            async function searchProducts() {
+                const q = (document.getElementById('prod-q')?.value || '').trim();
+                const box = document.getElementById('prod-results');
+                if (!box) return;
+
+                if (q.length < 2) { box.innerHTML = ''; return; }
+
+                if (_searchAbort) _searchAbort.abort();
+                _searchAbort = new AbortController();
+
+                box.innerHTML = `<div class="list-group-item text-muted small">Đang tìm...</div>`;
+
+                const url = `${PRODUCT_SEARCH_URL}?q=${encodeURIComponent(q)}`;
+                const resp = await fetch(url, {
+                    signal: _searchAbort.signal,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                }).catch(() => null);
+
+                if (!resp) {
+                    box.innerHTML = `<div class="list-group-item text-danger small">Không gọi được API tìm sản phẩm.</div>`;
+                    return;
+                }
+
+                const data = await resp.json().catch(() => null);
+                if (!resp.ok || !Array.isArray(data)) {
+                    box.innerHTML = `<div class="list-group-item text-danger small">API tìm sản phẩm trả về không hợp lệ.</div>`;
+                    return;
+                }
+
+                if (data.length === 0) {
+                    box.innerHTML = `<div class="list-group-item text-muted small">Không tìm thấy sản phẩm.</div>`;
+                    return;
+                }
+
+                box.innerHTML = '';
+                data.forEach(p => {
+                    const id = p.id ?? p.product_id ?? p.productId;
+                    const name = p.name ?? p.product_name ?? p.productName ?? ('#' + id);
+                    const img = p.image ?? p.image_url ?? p.thumb ?? p.product_image ?? p.productImage ?? '';
+
+                    const row = document.createElement('div');
+                    row.className = 'list-group-item d-flex align-items-center justify-content-between gap-2';
+                    row.innerHTML = `
+                        <div class="d-flex align-items-center gap-2" style="min-width:0;">
+                            ${img ? `<img src="${img}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;" />`
+                                  : `<div style="width:40px;height:40px;border-radius:8px;background:#f3f4f6;"></div>`}
+                            <div style="min-width:0;">
+                                <div class="fw-semibold text-truncate" style="max-width:420px;">${escapeHtml(name)}</div>
+                                <div class="small text-muted">#${escapeHtml(String(id))}</div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary">Thêm</button>
+                    `;
+                    row.querySelector('button').addEventListener('click', () => addCard(id, name, img));
+                    box.appendChild(row);
+                });
+            }
+
+            function escapeHtml(s) {
+                return (s ?? '').toString()
+                    .replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;')
+                    .replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;')
+                    .replaceAll("'", '&#039;');
+            }
+
+                        async function addCard(productId, productName, productImage) {
+              const res = await fetch(`${VARIANTS_URL}?productId=${encodeURIComponent(productId)}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+              }).catch(() => null);
+
+              const vars = res ? await res.json().catch(() => null) : null;
+
+              // Không có variant
+              if (!Array.isArray(vars) || vars.length === 0) {
+                appendCard(productId, '', productName, productImage, '(none)', '', '');
+                setDirty(true); scheduleAutosaveSoon();
+                return;
+              }
+
+              // 1 variant
+              if (vars.length === 1) {
+                const v = vars[0];
+                appendCard(
+                  productId,
+                  String(v.id),
+                  productName,
+                  productImage,
+                  v.name || ('#' + v.id),
+                  (v.retail_price ?? ''),
+                  (v.stock ?? '')
+                );
+                setDirty(true); scheduleAutosaveSoon();
+                return;
+              }
+
+              // nhiều variant => mở modal chọn
+              openVariantModal({ productId, productName, productImage, vars });
+            }
+
+
+                       function openVariantModal(p) {
+              // fallback nếu không có bootstrap modal
+              if (!window.bootstrap?.Modal) {
+                const v = p.vars[0];
+                appendCard(
+                  p.productId,
+                  String(v.id),
+                  p.productName,
+                  p.productImage,
+                  v.name || ('#' + v.id),
+                  (v.retail_price ?? ''),
+                  (v.stock ?? '')
+                );
+                setDirty(true); scheduleAutosaveSoon();
+                return;
+              }
+
+              const body = document.getElementById('variantModalBody');
+              body.innerHTML = '';
+
+              p.vars.forEach(v => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                btn.innerHTML = `
+                  <div>
+                    <div class="fw-semibold">${escapeHtml(v.name || ('#' + v.id))}</div>
+                    <div class="small text-muted">Giá: ${escapeHtml(v.retail_price ?? '-')} | Tồn: ${escapeHtml(v.stock ?? '-')}</div>
+                  </div>
+                  <span class="badge bg-primary">Chọn</span>
+                `;
+
+                btn.addEventListener('click', () => {
+                  appendCard(
+                    p.productId,
+                    String(v.id),
+                    p.productName,
+                    p.productImage,
+                    v.name || ('#' + v.id),
+                    (v.retail_price ?? ''),
+                    (v.stock ?? '')
+                  );
+                  bootstrap.Modal.getOrCreateInstance(document.getElementById('variantModal')).hide();
+                  setDirty(true); scheduleAutosaveSoon();
+                });
+
+                body.appendChild(btn);
+              });
+
+              bootstrap.Modal.getOrCreateInstance(document.getElementById('variantModal')).show();
+            }
+
+
+                        function appendCard(productId, variantId, productName, productImage, variantName, retailPrice, stock) {
+              const list = document.getElementById('cards-list');
+              if (!list) return;
+
+              const exists = [...list.children].some(x =>
+                x.getAttribute('data-product-id') == String(productId) &&
+                (x.getAttribute('data-variant-id') || '') == String(variantId || '')
+              );
+              if (exists) return;
+
+              const item = document.createElement('div');
+              item.className = 'list-group-item d-flex align-items-center gap-2';
+
+              item.setAttribute('data-product-id', productId);
+              item.setAttribute('data-variant-id', variantId || '');
+              item.setAttribute('data-product-name', productName || '');
+              item.setAttribute('data-product-image', productImage || '');
+
+              // ✅ đồng bộ đúng với preview
+              item.setAttribute('data-variant-name', variantName || '');
+              item.setAttribute('data-retail-price', (retailPrice ?? '').toString());
+              item.setAttribute('data-stock', (stock ?? '').toString());
+
+              const priceTxt = (retailPrice ?? '').toString().trim();
+              const stockTxt = (stock ?? '').toString().trim();
+
+              item.innerHTML = `
+                <span class="badge bg-secondary" style="cursor:grab">↕</span>
+                ${productImage
+                  ? `<img src="${productImage}" style="width:40px;height:40px;object-fit:cover;border-radius:8px;" />`
+                  : `<div style="width:40px;height:40px;border-radius:8px;background:#f3f4f6;"></div>`
+                }
+                <div class="flex-grow-1">
+                  <div class="fw-semibold">${escapeHtml(productName)}</div>
+                  <div class="small text-muted">
+                    Phân loại: ${escapeHtml(variantName || '(none)')}
+                    ${priceTxt ? ` <span class="ms-2">| Giá: ${escapeHtml(priceTxt)}</span>` : ``}
+                    ${stockTxt ? ` <span class="ms-2">| Tồn: ${escapeHtml(stockTxt)}</span>` : ``}
+                  </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-danger">X</button>
+              `;
+
+              item.querySelector('button').addEventListener('click', () => {
+                item.remove();
+                setDirty(true); scheduleAutosaveSoon();
+              });
+
+              list.appendChild(item);
+            }
+
+
+            function removeCard(btn) {
+                const row = btn.closest('.list-group-item');
+                if (row) {
+                    row.remove();
+                    setDirty(true); scheduleAutosaveSoon();
+                }
+            }
+
+                    // ===== time helpers (VN) =====
+        const VN_OFFSET_MIN = 7 * 60;
+
+        function utcNowMs() {
+          return Date.now();
+        }
+
+        // parse "yyyy-MM-ddTHH:mm" (datetime-local) như GIỜ VN -> trả về UTC ms
+        function parseVnLocalToUtcMs(vnLocalStr) {
+          if (!vnLocalStr) return null;
+
+          const [d, t] = vnLocalStr.split('T');
+          if (!d || !t) return null;
+
+          const [y, m, day] = d.split('-').map(Number);
+          const [hh, mm] = t.split(':').map(Number);
+
+          if (!y || !m || !day || hh == null || mm == null) return null;
+
+          // VN = UTC+7 => UTC = VN - 7h
+          return Date.UTC(y, m - 1, day, hh - 7, mm, 0, 0);
+        }
+
+        // format UTC ms -> "yyyy-MM-dd HH:mm" theo GIỜ VN (để show hint)
+        function formatUtcMsToVn(utcMs) {
+          const d = new Date(utcMs + VN_OFFSET_MIN * 60000);
+          const pad = (n) => String(n).padStart(2, '0');
+          return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+        }
+
+                                  function onBeforeSubmit(e) {
+          // chặn khi autosave đang chạy
+          if (_autosaveInFlight) {
+            alert('Đang autosave... vui lòng thử lại sau vài giây.');
+            return false;
+          }
+
+          // lấy nút submit thật sự
+          const submitter = e?.submitter || document.activeElement;
+          const action = submitter?.dataset?.action || '';
+          const actionHidden = document.getElementById('action_hidden');
+          if (actionHidden) actionHidden.value = action;
+
+          // permission gate client-side
+          if (action === 'Publish' && !PERM.canPublish) { alert('Bạn không có quyền Đăng.'); return false; }
+          if (action === 'Schedule' && !PERM.canSchedule) { alert('Bạn không có quyền Hẹn giờ đăng.'); return false; }
+          if (action === 'Archive' && !PERM.canArchive) { alert('Bạn không có quyền Lưu trữ.'); return false; }
+          if (action === 'SaveDraft' && !(PERM.canCreate || PERM.canUpdate)) { alert('Bạn không có quyền Lưu nháp.'); return false; }
+
+          // đọc schedule (chỉ có 1 input schedule_vn là đúng)
+          const schEl = document.getElementById('schedule_vn');
+          const scheduleVal = (schEl?.value || '').trim();
+
+          if (action === 'Schedule') {
+            if (!scheduleVal) {
+              alert('Bạn chọn "Hẹn giờ đăng" thì phải nhập Schedule (giờ VN).');
+              return false;
+            }
+
+            const targetUtcMs = parseVnLocalToUtcMs(scheduleVal);
+            if (!targetUtcMs) {
+              alert('Schedule không hợp lệ.');
+              return false;
+            }
+
+            // phải ở tương lai ít nhất 60s
+            if (targetUtcMs <= Date.now() + 60_000) {
+              alert('Thời gian hẹn đăng phải ở tương lai (giờ VN).');
+              return false;
+            }
+          }
+
+          // set hidden fields để server nhận đủ dữ liệu
+          const scheduledHidden = document.getElementById('scheduled_at_vn');
+          if (scheduledHidden) scheduledHidden.value = scheduleVal;
+
+          const contentHidden = document.getElementById('content_html');
+          if (contentHidden) contentHidden.value = getEditorHtml();
+
+          const cardsHidden = document.getElementById('cards_json');
+          if (cardsHidden) cardsHidden.value = buildCardsJson();
+
+          // sync cat/tag vào hidden csv (đảm bảo không lệch)
+          syncCats();
+          syncTags();
+
+          // khóa nút submit để tránh double click
+          setTimeout(() => lockSubmitButtons(true), 0);
+
+          // đã submit thì coi như sạch (trang thường sẽ reload)
+          setDirty(false);
+          return true;
+        }
+
+
+    </script>
+
+}

@@ -2,12 +2,16 @@
 {
     public sealed class CmsTablePermission
     {
-        public bool CanView { get; init; }
-        public bool CanCreate { get; init; }
-        public bool CanUpdate { get; init; }
-        public bool CanDelete { get; init; }
+        public bool CanView { get; set; }
+        public bool CanCreate { get; set; }
+        public bool CanUpdate { get; set; }
+        public bool CanDelete { get; set; }
 
-        // Có thể override row_filter của bảng theo role
-        public string? RowFilter { get; init; }
+        // ✅ thêm quyền riêng
+        public bool CanPublish { get; set; }
+        public bool CanSchedule { get; set; }
+        public bool CanArchive { get; set; }
+
+        public string? RowFilter { get; set; }
     }
 }

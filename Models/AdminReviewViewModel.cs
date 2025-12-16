@@ -29,18 +29,21 @@ namespace CmsTools.Models
         public DateTime Created_At { get; set; }
         public DateTime Updated_At { get; set; }
 
-        // 🔹 mới: ẩn/hiện review trên web
+        // Ẩn/hiện review trên web
         public bool Is_Hidden { get; set; }
 
         // reply
         public string? Reply_Content { get; set; }
         public DateTime? Reply_Created_At { get; set; }
         public long? Reply_Admin_User_Id { get; set; }
-
-        // 🔹 mới: tên admin (tạm để null, sau này join bảng user CMS)
         public string? Reply_Admin_Name { get; set; }
 
-        // 🔹 danh sách ảnh đánh giá
+        // Danh sách ảnh đánh giá
         public List<AdminReviewImageViewModel> Images { get; set; } = new();
+
+        // 🔹 NEW: thông tin AI
+        public byte? Ai_Decision_Source { get; set; }   // 0 = none, 1 = rule/local, 2 = LLM
+        public string? Ai_Reason { get; set; }
+        public string? Ai_Flags_Json { get; set; }
     }
 }

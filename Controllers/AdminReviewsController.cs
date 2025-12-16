@@ -35,24 +35,30 @@ namespace CmsTools.Controllers
             const string sql = @"
 SELECT TOP(1)
     r.id,
-    r.product_id         AS Product_Id,
-    r.variant_id         AS Variant_Id,
-    r.user_info_id       AS User_Info_Id,
-    u.full_name          AS User_Name,
-    p.name               AS Product_Name,
+    r.product_id                 AS Product_Id,
+    r.variant_id                 AS Variant_Id,
+    r.user_info_id               AS User_Info_Id,
+    u.full_name                  AS User_Name,
+    p.name                       AS Product_Name,
     r.rating,
     r.title,
     r.content,
-    r.has_image          AS Has_Image,
-    r.is_verified_purchase AS Is_Verified_Purchase,
+    r.has_image                  AS Has_Image,
+    r.is_verified_purchase       AS Is_Verified_Purchase,
     r.status,
-    r.created_at         AS Created_At,
-    r.updated_at         AS Updated_At,
-    r.is_hidden          AS Is_Hidden,
-    rr.[content]         AS Reply_Content,
-    rr.created_at        AS Reply_Created_At,
-    rr.admin_user_id     AS Reply_Admin_User_Id,
-    NULL                 AS Reply_Admin_Name
+    r.created_at                 AS Created_At,
+    r.updated_at                 AS Updated_At,
+    r.is_hidden                  AS Is_Hidden,
+
+    -- 🔹 AI fields
+    r.ai_decision_source         AS Ai_Decision_Source,
+    r.ai_reason                  AS Ai_Reason,
+    r.ai_flags_json              AS Ai_Flags_Json,
+
+    rr.[content]                 AS Reply_Content,
+    rr.created_at                AS Reply_Created_At,
+    rr.admin_user_id             AS Reply_Admin_User_Id,
+    NULL                         AS Reply_Admin_Name
 FROM dbo.tbl_product_review r
 LEFT JOIN dbo.tbl_user_info u
        ON u.id = r.user_info_id
@@ -78,11 +84,12 @@ ORDER BY sort_order, id;
 ";
 
             var images = await con.QueryAsync<AdminReviewImageViewModel>(sqlImages, new { id });
-            vm.Images = images.AsList(); // hoặc images.ToList()
+            vm.Images = images.AsList();
 
             // Partial view: Views/AdminReviews/_ReviewModal.cshtml
             return PartialView("_ReviewModal", vm);
         }
+
 
 
 

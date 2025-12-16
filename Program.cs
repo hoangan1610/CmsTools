@@ -26,7 +26,7 @@ builder.Services.AddScoped<ICmsPermissionService, CmsPermissionService>();
 builder.Services.AddScoped<ICmsAuditLogger, CmsAuditLogger>();
 builder.Services.AddHttpContextAccessor();
 
-
+builder.Services.AddHttpClient();
 // Login / action audit
 builder.Services.AddScoped<IAuditLogger, AuditLogger>();
 // Auth: Cookie
@@ -41,12 +41,20 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("CmsUser", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        // yêu cầu có cms_user_id (đúng hệ CMS của bạn)
+        policy.RequireClaim("cms_user_id");
+    });
+
     options.AddPolicy("CmsAdminOnly", policy =>
     {
         policy.RequireAuthenticatedUser();
         policy.RequireClaim("cms_is_admin", "1");
     });
 });
+
 
 
 
