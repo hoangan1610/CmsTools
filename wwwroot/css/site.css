@@ -579,3 +579,134 @@
             flex-wrap: wrap;
         }
 }
+/* ====== LAYOUT SHELL: sidebar fixed width ====== */
+.cms-shell {
+    display: flex;
+    min-height: calc(100vh - 56px); /* 56px navbar */
+}
+
+.cms-sidebar-col {
+    flex: 0 0 300px; /* chỉnh 280/300/320 tùy mắt */
+    width: 300px;
+    max-width: 300px;
+}
+
+.cms-main {
+    flex: 1 1 auto;
+    min-width: 0; /* quan trọng để table không làm bung layout */
+}
+
+/* ====== SIDEBAR scroll + FIX sticky header bị lộ item phía trên ====== */
+.cms-sidebar {
+    height: calc(100vh - 56px);
+    overflow-y: auto;
+    padding: 0 !important; /* <<< cái này fix “tbl_article thò lên” */
+    background: #fff;
+    border-right: 1px solid rgba(0,0,0,.08);
+}
+
+/* responsive */
+@media (max-width: 991.98px) {
+    .cms-sidebar-col {
+        flex-basis: 260px;
+        width: 260px;
+        max-width: 260px;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .cms-shell {
+        flex-direction: column;
+    }
+
+    .cms-sidebar-col {
+        flex-basis: auto;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .cms-sidebar {
+        height: auto;
+        max-height: 60vh;
+    }
+}
+/* Sidebar fixed width (override bootstrap col-*) */
+.cms-sidebar-col {
+    flex: 0 0 300px !important;
+    width: 300px !important;
+    max-width: 300px !important;
+}
+
+.cms-main {
+    flex: 1 1 auto;
+    width: auto !important;
+    min-width: 0;
+}
+
+/* fix sticky header bị “thò” item ở trên */
+.cms-sidebar {
+    padding: 0 !important;
+}
+/* =================== CMS SHELL (FINAL - NO CONFLICT) =================== */
+:root {
+    --cms-navbar-h: 56px;
+    --cms-sidebar-w: 270px; /* ThinkPad X1 Carbon Gen 6 FHD: 260-280 là đẹp */
+}
+
+/* wrapper flex (thay cho row/col bootstrap) */
+.cms-shell {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    min-height: calc(100vh - var(--cms-navbar-h));
+}
+
+/* sidebar fixed width */
+.cms-sidebar-col {
+    flex: 0 0 var(--cms-sidebar-w);
+    width: var(--cms-sidebar-w);
+    max-width: var(--cms-sidebar-w);
+    background: #fff;
+    border-right: 1px solid rgba(0,0,0,.08);
+}
+
+/* sidebar scroll + không padding để sticky header của tree không “thò” */
+.cms-sidebar {
+    height: calc(100vh - var(--cms-navbar-h));
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 !important;
+    background: #fff;
+}
+
+/* main luôn nằm cạnh sidebar */
+.cms-main {
+    flex: 1 1 auto;
+    min-width: 0; /* quan trọng để table rộng không làm bung layout */
+    padding: 1rem 1.25rem 1.5rem;
+}
+
+/* Tablet */
+@media (max-width: 991.98px) {
+    :root {
+        --cms-sidebar-w: 260px;
+    }
+}
+
+/* Mobile: xếp dọc */
+@media (max-width: 767.98px) {
+    .cms-shell {
+        flex-direction: column;
+    }
+
+    .cms-sidebar-col {
+        flex: 0 0 auto;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .cms-sidebar {
+        height: auto;
+        max-height: 60vh;
+    }
+}

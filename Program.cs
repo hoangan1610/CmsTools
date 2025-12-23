@@ -1,6 +1,8 @@
 ﻿using CmsTools.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,12 +57,44 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
+Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+
+builder.Services.AddHttpClient("OpenAI", (sp, http) =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var baseUrl = (cfg["OpenAI:BaseUrl"] ?? "").TrimEnd('/') + "/";
+    http.BaseAddress = new Uri(baseUrl);
+
+    http.Timeout = TimeSpan.FromMinutes(5);
+
+    http.DefaultRequestHeaders.Accept.Clear();
+    http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+    var apiKey = cfg["OpenAI:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(apiKey))
+        http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", apiKey);
+});
+
+builder.Services.AddScoped<IRevenueAiInsightService, RevenueAiInsightService>();
 
 
 
 // ========== BUILD APP ==========
 
 var app = builder.Build();
+
+// ✅ Trust proxy headers (Cloudflare Tunnel)
+var fwd = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+// Dev tunnel: bỏ giới hạn proxy IP
+fwd.KnownNetworks.Clear();
+fwd.KnownProxies.Clear();
+app.UseForwardedHeaders(fwd);
+
 
 // ========== MIDDLEWARE PIPELINE ==========
 
@@ -70,7 +104,11 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseStaticFiles();
 
 app.UseRouting();
@@ -85,5 +123,6 @@ app.MapControllerRoute(
 
 
 // ========== RUN ==========
+
 
 app.Run();

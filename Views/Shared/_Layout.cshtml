@@ -5,9 +5,8 @@
     <title>@ViewData["Title"] - CMS_Tools</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <link rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 
     @RenderSection("Styles", required: false)
@@ -23,6 +22,7 @@
                 <a class="navbar-brand fw-semibold" asp-controller="Home" asp-action="Index">
                     CMS_Tools
                 </a>
+
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
                         data-bs-target="#cmsNavbar"
                         aria-controls="cmsNavbar" aria-expanded="false"
@@ -34,14 +34,10 @@
                     <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                         @if (isAdmin)
                         {
-                            <!-- Mục lộ trình chính -->
                             <li class="nav-item">
-                                <a class="nav-link" asp-controller="Schema" asp-action="Index">
-                                    Schema
-                                </a>
+                                <a class="nav-link" asp-controller="Schema" asp-action="Index">Schema</a>
                             </li>
 
-                            <!-- Dropdown Quyền -->
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#"
                                    id="navPermissions" role="button"
@@ -49,22 +45,11 @@
                                     Quyền
                                 </a>
                                 <ul class="dropdown-menu" aria-labelledby="navPermissions">
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Permissions" asp-action="Index">
-                                            Quyền theo role
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Permissions" asp-action="Tables">
-                                            Quyền theo bảng
-                                        </a>
-                                    </li>
+                                    <li><a class="dropdown-item" asp-controller="Permissions" asp-action="Index">Quyền theo role</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Permissions" asp-action="Tables">Quyền theo bảng</a></li>
                                 </ul>
                             </li>
 
-                            <!-- Dropdown Người dùng -->
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#"
                                    id="navUsers" role="button"
@@ -72,22 +57,11 @@
                                     Người dùng
                                 </a>
                                 <ul class="dropdown-menu" aria-labelledby="navUsers">
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Users" asp-action="Index">
-                                            Users
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Users" asp-action="LoginLogs">
-                                            Login logs
-                                        </a>
-                                    </li>
+                                    <li><a class="dropdown-item" asp-controller="Users" asp-action="Index">Users</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Users" asp-action="LoginLogs">Login logs</a></li>
                                 </ul>
                             </li>
 
-                            <!-- Dropdown Hệ thống -->
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#"
                                    id="navSystem" role="button"
@@ -95,42 +69,33 @@
                                     Hệ thống
                                 </a>
                                 <ul class="dropdown-menu" aria-labelledby="navSystem">
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Connections" asp-action="Index">
-                                            Connections
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Audit" asp-action="Index">
-                                            Audit log
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item"
-                                           asp-controller="Health" asp-action="Connections">
-                                            Health
-                                        </a>
-                                    </li>
+                                    <li><a class="dropdown-item" asp-controller="Connections" asp-action="Index">Connections</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Audit" asp-action="Index">Audit log</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Health" asp-action="Connections">Health</a></li>
                                 </ul>
                             </li>
 
-                            <!-- Báo cáo để ngoài cho dễ bấm -->
                             <li class="nav-item">
-                                <a class="nav-link" asp-controller="Reports" asp-action="Revenue">
-                                    📈 Báo cáo doanh thu
-                                </a>
+                                <a class="nav-link" asp-controller="Reports" asp-action="Revenue">📈 Báo cáo doanh thu</a>
                             </li>
 
-                            <!-- Đơn mới realtime (LIVE) -->
                             <li class="nav-item">
-                                <a class="nav-link d-flex align-items-center"
-                                   asp-controller="Orders" asp-action="live">
+                                <a class="nav-link d-flex align-items-center" asp-controller="Orders" asp-action="Live">
                                     <span class="me-1">🔴 Đơn mới</span>
                                     <span class="badge rounded-pill bg-danger">LIVE</span>
                                 </a>
                             </li>
+
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Articles" asp-action="Index">📝 Bài viết</a>
+                            </li>
+
+                            <a class="nav-link"
+                               asp-controller="Reports"
+                               asp-action="ReorderSuggest">
+                                Gợi ý nhập hàng
+                            </a>
+
                         }
                     </ul>
 
@@ -138,16 +103,11 @@
                         @if (User?.Identity?.IsAuthenticated ?? false)
                         {
                             <li class="nav-item d-flex align-items-center">
-                                <span class="navbar-text me-2 small text-nowrap">
-                                    @User.Identity!.Name
-                                </span>
+                                <span class="navbar-text me-2 small text-nowrap">@User.Identity!.Name</span>
                             </li>
                             <li class="nav-item">
-                                <form class="d-inline" method="post"
-                                      asp-controller="Account" asp-action="Logout">
-                                    <button type="submit" class="btn btn-sm btn-outline-light">
-                                        Đăng xuất
-                                    </button>
+                                <form class="d-inline" method="post" asp-controller="Account" asp-action="Logout">
+                                    <button type="submit" class="btn btn-sm btn-outline-light">Đăng xuất</button>
                                 </form>
                             </li>
                         }
@@ -157,44 +117,37 @@
         </nav>
     </header>
 
-    <div class="container-fluid cms-container">
-        <div class="row">
-            <!-- SIDEBAR -->
-            <div class="col-12 col-md-3 col-lg-2 cms-sidebar-col">
-                @{
-                    int? currentTableId = null;
+    @{
+        int? currentTableId = null;
 
-                    if (Context.Request.RouteValues.TryGetValue("tableId", out var tblRoute)
-                    && int.TryParse(tblRoute?.ToString(), out var tid1))
-                    {
-                        currentTableId = tid1;
-                    }
-                    else
-                    {
-                        var q = Context.Request.Query["tableId"].ToString();
-                        if (int.TryParse(q, out var tid2))
-                        {
-                            currentTableId = tid2;
-                        }
-                    }
-                }
+        if (Context.Request.RouteValues.TryGetValue("tableId", out var tblRoute)
+        && int.TryParse(tblRoute?.ToString(), out var tid1))
+        {
+            currentTableId = tid1;
+        }
+        else
+        {
+            var q = Context.Request.Query["tableId"].ToString();
+            if (int.TryParse(q, out var tid2)) currentTableId = tid2;
+        }
+    }
 
-                <div class="cms-sidebar">
-                    @await Component.InvokeAsync("SchemaTree", new { currentTableId = currentTableId })
-                </div>
+    <!-- FLEX SHELL: không dùng row/col bootstrap để tránh wrap -->
+    <div class="cms-shell">
+        <aside class="cms-sidebar-col">
+            <div class="cms-sidebar">
+                @await Component.InvokeAsync("SchemaTree", new { currentTableId = currentTableId })
             </div>
+        </aside>
 
-            <!-- MAIN CONTENT -->
-            <main role="main" class="col-12 col-md-9 col-lg-10 cms-main">
-                @RenderBody()
-            </main>
-        </div>
+        <main role="main" class="cms-main">
+            @RenderBody()
+        </main>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
 
     @await RenderSectionAsync("Scripts", required: false)
-
 </body>
 </html>

@@ -1,16 +1,28 @@
 ﻿@model RevenueReportViewModel
+@using CmsTools.Models
 @using System.Globalization
 @using System.Text.Json
+@using System
+@using System.Collections.Generic
+@using System.Linq
 
 @{
     ViewData["Title"] = "Báo cáo doanh thu";
 
     var hasRows = Model.Rows != null && Model.Rows.Any();
 
-    // ==== KPI nâng cao theo thời gian ====
-    var dayCount = hasRows ? Model.Rows.Count : 0;
-    var avgRevenuePerDay = (dayCount > 0)
-        ? (Model.Overview.TotalPayTotal / dayCount)
+    // ===== Range days =====
+    var rangeDays = (Model.ToDate.Date - Model.FromDate.Date).Days + 1;
+    if (rangeDays < 1) rangeDays = 1;
+
+    // ===== KPI nâng cao =====
+    // NOTE: Rows.Count là số period có dữ liệu (ngày hoặc tháng)
+    var periodCount = hasRows ? Model.Rows.Count : 0;
+    var periodLabel = (Model.GroupBy == "month") ? "Số tháng có đơn" : "Số ngày có đơn";
+
+    // TB/ngày theo toàn kỳ lọc
+    var avgRevenuePerDay = (rangeDays > 0)
+        ? (Model.Overview.TotalPayTotal / rangeDays)
         : 0m;
 
     var discountRate = (Model.Overview.TotalSubTotal > 0)
@@ -37,7 +49,7 @@
         ? "0 %"
         : ordDelta.ToString("0.##", CultureInfo.CurrentCulture) + " %";
 
-    // ==== Chuẩn bị data cho Chart.js (trend) ====
+    // ===== Data cho Chart.js (trend) =====
     var labelFormat = Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy";
     var labels = hasRows
         ? Model.Rows.Select(r => r.PeriodDate.ToString(labelFormat)).ToList()
@@ -55,7 +67,7 @@
     var revenueJson = JsonSerializer.Serialize(revenueData);
     var ordersJson = JsonSerializer.Serialize(ordersData);
 
-    // ==== Top 5 ngày doanh thu cao nhất ====
+    // ===== Top 5 period doanh thu cao nhất =====
     var top5RevenueDays = hasRows
         ? Model.Rows
             .OrderByDescending(r => r.PayTotal)
@@ -65,17 +77,23 @@
 
     var topPeriodDates = new HashSet<DateTime>(top5RevenueDays.Select(r => r.PeriodDate.Date));
 
-    // ==== Data kênh thanh toán ====
+    // ===== Data kênh thanh toán =====
     var providerRows = Model.Providers ?? new List<RevenueByProviderRow>();
     var hasProviderRows = providerRows.Any();
-    var providerLabels = providerRows.Select(p => p.ProviderLabel).ToList();
+
+    // Label hiển thị tránh trùng tên
+    var providerDisplayLabels = providerRows
+        .Select(p => $"{p.ProviderLabel} ({p.MethodLabel})")
+        .ToList();
+
     var providerAmounts = providerRows.Select(p => p.TotalAmount).ToList();
     var providerOrders = providerRows.Select(p => p.SuccessfulOrders).ToList();
-    var providerLabelsJson = JsonSerializer.Serialize(providerLabels);
+
+    var providerLabelsJson = JsonSerializer.Serialize(providerDisplayLabels);
     var providerAmountsJson = JsonSerializer.Serialize(providerAmounts);
     var providerOrdersJson = JsonSerializer.Serialize(providerOrders);
 
-    // ==== Tổng hợp COD vs Online ====
+    // ===== Tổng hợp COD vs Online =====
     var totalRevenue = Model.Overview.TotalPayTotal;
     var totalOrders = Model.Overview.TotalOrders;
 
@@ -84,21 +102,16 @@
     int onlineOrders = 0;
     decimal onlineAmount = 0m;
 
+    bool IsCod(RevenueByProviderRow p) =>
+        string.Equals((p.ProviderLabel ?? "").Trim(), "COD", StringComparison.OrdinalIgnoreCase);
+
     if (hasProviderRows)
     {
-        codOrders = providerRows
-            .Where(p => p.ProviderLabel == "COD")
-            .Sum(p => p.SuccessfulOrders);
-        codAmount = providerRows
-            .Where(p => p.ProviderLabel == "COD")
-            .Sum(p => p.TotalAmount);
+        codOrders = providerRows.Where(IsCod).Sum(p => p.SuccessfulOrders);
+        codAmount = providerRows.Where(IsCod).Sum(p => p.TotalAmount);
 
-        onlineOrders = providerRows
-            .Where(p => p.ProviderLabel != "COD")
-            .Sum(p => p.SuccessfulOrders);
-        onlineAmount = providerRows
-            .Where(p => p.ProviderLabel != "COD")
-            .Sum(p => p.TotalAmount);
+        onlineOrders = providerRows.Where(p => !IsCod(p)).Sum(p => p.SuccessfulOrders);
+        onlineAmount = providerRows.Where(p => !IsCod(p)).Sum(p => p.TotalAmount);
     }
 
     var onlineRevenueShare = (totalRevenue > 0m && onlineAmount > 0m)
@@ -108,6 +121,18 @@
     var onlineOrderShare = (totalOrders > 0 && onlineOrders > 0)
         ? (decimal)onlineOrders * 100m / totalOrders
         : 0m;
+
+    // ===== Reconcile: Providers vs Overview =====
+    decimal providersSumAmount = hasProviderRows ? providerRows.Sum(p => p.TotalAmount) : 0m;
+    int providersSumOrders = hasProviderRows ? providerRows.Sum(p => p.SuccessfulOrders) : 0;
+
+    decimal providersAmountDiff = providersSumAmount - totalRevenue;
+    int providersOrdersDiff = providersSumOrders - totalOrders;
+
+    // tolerance nhỏ (amount là decimal(12,2) => có thể lệch 0.01~0.99 do rounding hiếm gặp)
+    bool providersMismatch =
+        hasProviderRows &&
+        (Math.Abs(providersAmountDiff) >= 1m || providersOrdersDiff != 0);
 }
 
 <div class="cmstools-page-header mb-3">
@@ -143,6 +168,7 @@
                            value="@Model.FromDate.ToString("yyyy-MM-dd")" />
                 </div>
             </div>
+
             <div class="col-12 col-md-3">
                 <label class="form-label small mb-1">Đến ngày</label>
                 <div class="cmstools-date-wrapper">
@@ -161,47 +187,32 @@
             <div class="col-6 col-md-3">
                 <label class="form-label small mb-1">Nhóm theo</label>
                 <select name="groupBy" class="form-select form-select-sm">
-                    @if (Model.GroupBy == "day")
-                    {
-                        <option value="day" selected>Ngày</option>
-                    }
-                    else
-                    {
-                        <option value="day">Ngày</option>
-                    }
+    @if (Model.GroupBy == "month")
+    {
+        <option value="day">Ngày</option>
+        <option value="month" selected="selected">Tháng</option>
+    }
+    else
+    {
+        <option value="day" selected="selected">Ngày</option>
+        <option value="month">Tháng</option>
+    }
+</select>
 
-                    @if (Model.GroupBy == "month")
-                    {
-                        <option value="month" selected>Tháng</option>
-                    }
-                    else
-                    {
-                        <option value="month">Tháng</option>
-                    }
-                </select>
+
             </div>
 
             <div class="col-12 col-md-3 d-flex align-items-end">
                 <div class="ms-md-auto text-md-end">
                     <div class="btn-group btn-group-sm mb-2 report-range-chips">
-                        <button type="button" class="btn btn-outline-secondary" data-range="last7">
-                            7 ngày gần nhất
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" data-range="thisMonth">
-                            Tháng này
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" data-range="lastMonth">
-                            Tháng trước
-                        </button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="last7">7 ngày gần nhất</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="thisMonth">Tháng này</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="lastMonth">Tháng trước</button>
                     </div>
                     <div>
-                        <button type="submit" class="btn btn-primary btn-sm me-2">
-                            Lọc
-                        </button>
+                        <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
                         <a class="btn btn-outline-secondary btn-sm"
-                           href="@Url.Action("Revenue", "Reports")">
-                            Reset
-                        </a>
+                           href="@Url.Action("Revenue", "Reports")">Reset</a>
                     </div>
                 </div>
             </div>
@@ -217,9 +228,7 @@
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <div class="report-kpi-label">Tổng số đơn</div>
-                        <div class="fw-bold fs-5 report-kpi-value">
-                            @Model.Overview.TotalOrders
-                        </div>
+                        <div class="fw-bold fs-5 report-kpi-value">@Model.Overview.TotalOrders</div>
                         <div class="report-kpi-delta @OrdDeltaCss">
                             <span class="report-kpi-dot"></span>
                             @ordDeltaText (so với kỳ trước)
@@ -306,14 +315,12 @@
         </div>
     </div>
 
-    @* Số ngày có đơn *@
+    @* Số period có đơn *@
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm report-kpi-card">
             <div class="card-body py-2">
-                <div class="report-kpi-label">Số ngày có đơn</div>
-                <div class="fw-bold fs-6 report-kpi-value">
-                    @dayCount
-                </div>
+                <div class="report-kpi-label">@periodLabel</div>
+                <div class="fw-bold fs-6 report-kpi-value">@periodCount</div>
             </div>
         </div>
     </div>
@@ -372,6 +379,39 @@
     }
 </div>
 
+@if (Model.Ai != null)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <div class="fw-semibold">AI Insights</div>
+                <span class="badge bg-light text-muted border">Beta</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Model.Ai.Summary))
+            {
+                <div class="mb-2">@Model.Ai.Summary</div>
+            }
+
+            @if (Model.Ai.Highlights?.Any() == true)
+            {
+                <div class="small text-muted fw-semibold">Điểm nổi bật</div>
+                <ul class="mb-2">
+                    @foreach (var h in Model.Ai.Highlights) { <li>@h</li> }
+                </ul>
+            }
+
+            @if (Model.Ai.Alerts?.Any() == true)
+            {
+                <div class="small text-muted fw-semibold">Cảnh báo</div>
+                <ul class="mb-0">
+                    @foreach (var a in Model.Ai.Alerts) { <li>@a</li> }
+                </ul>
+            }
+        </div>
+    </div>
+}
+
 @* ==== BIỂU ĐỒ TREND ==== *@
 @if (hasRows)
 {
@@ -379,12 +419,8 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <div>
-                    <div class="report-section-title">
-                        Xu hướng theo thời gian
-                    </div>
-                    <h5 class="card-title mb-0">
-                        Doanh thu & số đơn
-                    </h5>
+                    <div class="report-section-title">Xu hướng theo thời gian</div>
+                    <h5 class="card-title mb-0">Doanh thu & số đơn</h5>
                     <span class="badge report-badge-soft mt-1">
                         Nhóm theo: @(Model.GroupBy == "month" ? "Tháng" : "Ngày")
                     </span>
@@ -397,20 +433,17 @@
                              toDate   = Model.ToDate.ToString("yyyy-MM-dd"),
                              groupBy  = Model.GroupBy,
                              format   = "csv"
-                       })">
-                        Export CSV
-                    </a>
+                       })">Export CSV</a>
                     <a class="btn btn-outline-secondary"
                        href="@Url.Action("RevenueExport", "Reports", new {
                              fromDate = Model.FromDate.ToString("yyyy-MM-dd"),
                              toDate   = Model.ToDate.ToString("yyyy-MM-dd"),
                              groupBy  = Model.GroupBy,
                              format   = "excel"
-                       })">
-                        Export Excel
-                    </a>
+                       })">Export Excel</a>
                 </div>
             </div>
+
             <div style="max-height: 320px;">
                 <canvas id="revenueChart"></canvas>
             </div>
@@ -459,21 +492,15 @@ else
                             toFilterDate   = periodDate;
                         }
 
-                        var drillUrl = Url.Action(
-                            "Index",
-                            "Orders",
-                            new {
-                                deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
-                                deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
-                            }
-                        );
+                        var drillUrl = Url.Action("Index", "Orders", new {
+                            deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
+                            deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
+                        });
 
                         <tr class="@(isTop ? "table-warning" : "")">
                             <td>
-                                <a href="@drillUrl"
-                                   class="text-decoration-none @(isTop ? "fw-bold" : "")">
-                                    @r.PeriodDate.ToString(
-                                        Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy")
+                                <a href="@drillUrl" class="text-decoration-none @(isTop ? "fw-bold" : "")">
+                                    @r.PeriodDate.ToString(Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy")
                                 </a>
                             </td>
                             <td class="text-end">@r.OrderCount</td>
@@ -481,9 +508,7 @@ else
                             <td class="text-end">@r.DiscountTotal.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td class="text-end">@r.ShippingTotal.ToString("N0", CultureInfo.CurrentCulture)</td>
                             <td class="text-end">@r.VatTotal.ToString("N0", CultureInfo.CurrentCulture)</td>
-                            <td class="text-end fw-bold">
-                                @r.PayTotal.ToString("N0", CultureInfo.CurrentCulture)
-                            </td>
+                            <td class="text-end fw-bold">@r.PayTotal.ToString("N0", CultureInfo.CurrentCulture)</td>
                         </tr>
                     }
                 </tbody>
@@ -491,14 +516,13 @@ else
         </div>
     </div>
 
-    @* ==== TOP 5 NGÀY DOANH THU CAO NHẤT ==== *@
+    @* ==== TOP 5 ==== *@
     @if (top5RevenueDays.Any())
     {
         <div class="card mb-3">
             <div class="card-body py-2">
-                <h5 class="card-title mb-2 small text-muted">
-                    Top 5 ngày có doanh thu cao nhất
-                </h5>
+                <h5 class="card-title mb-2 small text-muted">Top 5 @(Model.GroupBy == "month" ? "tháng" : "ngày") có doanh thu cao nhất</h5>
+
                 <div class="cmstools-table-container">
                     <div class="cmstools-table-scroll">
                         <table class="table table-sm table-bordered align-middle mb-0">
@@ -531,28 +555,20 @@ else
                                         toFilterDate   = periodDate;
                                     }
 
-                                    var drillUrl = Url.Action(
-                                        "Index",
-                                        "Orders",
-                                        new {
-                                            deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
-                                            deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
-                                        }
-                                    );
+                                    var drillUrl = Url.Action("Index", "Orders", new {
+                                        deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
+                                        deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
+                                    });
 
                                     <tr>
                                         <td class="text-center">@idx</td>
                                         <td>
-                                            <a href="@drillUrl"
-                                               class="text-decoration-none fw-semibold">
-                                                @r.PeriodDate.ToString(
-                                                    Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy")
+                                            <a href="@drillUrl" class="text-decoration-none fw-semibold">
+                                                @r.PeriodDate.ToString(Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy")
                                             </a>
                                         </td>
                                         <td class="text-end">@r.OrderCount</td>
-                                        <td class="text-end fw-bold">
-                                            @r.PayTotal.ToString("N0", CultureInfo.CurrentCulture) đ
-                                        </td>
+                                        <td class="text-end fw-bold">@r.PayTotal.ToString("N0", CultureInfo.CurrentCulture) đ</td>
                                     </tr>
                                     idx++;
                                 }
@@ -564,18 +580,37 @@ else
         </div>
     }
 
+    @* ==== Reconcile banner ==== *@
+    @if (providersMismatch)
+    {
+        <div class="alert alert-warning d-flex justify-content-between align-items-start mb-3">
+            <div>
+                <div class="fw-semibold">Cảnh báo đối soát kênh thanh toán</div>
+                <div class="small">
+                    Tổng theo kênh = <strong>@providersSumAmount.ToString("N0", CultureInfo.CurrentCulture) đ</strong>
+                    / @providersSumOrders đơn,
+                    trong khi Overview = <strong>@totalRevenue.ToString("N0", CultureInfo.CurrentCulture) đ</strong>
+                    / @totalOrders đơn.
+                </div>
+                <div class="small text-muted">
+                    Chênh lệch: @providersAmountDiff.ToString("N0", CultureInfo.CurrentCulture) đ,
+                    @providersOrdersDiff đơn.
+                </div>
+            </div>
+            <div class="small text-muted text-end">
+                Gợi ý: kiểm tra order có nhiều payment_transaction success / retry / duplicate.
+            </div>
+        </div>
+    }
+
     @* ==== TAB PHỤ: KÊNH THANH TOÁN ==== *@
     @if (hasProviderRows)
     {
         <div class="card mb-3">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h5 class="card-title mb-0 small text-muted">
-                        Phân bổ doanh thu theo kênh thanh toán
-                    </h5>
-                    <span class="badge bg-light text-muted border">
-                        Dựa trên các đơn trong khoảng lọc
-                    </span>
+                    <h5 class="card-title mb-0 small text-muted">Phân bổ doanh thu theo kênh thanh toán</h5>
+                    <span class="badge bg-light text-muted border">Dựa trên các đơn trong khoảng lọc</span>
                 </div>
 
                 <ul class="nav nav-tabs small" role="tablist">
@@ -622,23 +657,15 @@ else
                                             <tbody>
                                                 @foreach (var p in providerRows)
                                                 {
-                                                    var avg = p.SuccessfulOrders > 0
-                                                        ? p.TotalAmount / p.SuccessfulOrders
-                                                        : 0m;
+                                                    var avg = p.SuccessfulOrders > 0 ? (p.TotalAmount / p.SuccessfulOrders) : 0m;
                                                     <tr>
                                                         <td>
                                                             <strong>@p.ProviderLabel</strong>
-                                                            <div class="small text-muted">
-                                                                @p.MethodLabel
-                                                            </div>
+                                                            <div class="small text-muted">@p.MethodLabel</div>
                                                         </td>
                                                         <td class="text-end">@p.SuccessfulOrders</td>
-                                                        <td class="text-end">
-                                                            @p.TotalAmount.ToString("N0", CultureInfo.CurrentCulture) đ
-                                                        </td>
-                                                        <td class="text-end">
-                                                            @avg.ToString("N0", CultureInfo.CurrentCulture) đ
-                                                        </td>
+                                                        <td class="text-end">@p.TotalAmount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                                        <td class="text-end">@avg.ToString("N0", CultureInfo.CurrentCulture) đ</td>
                                                     </tr>
                                                 }
                                             </tbody>
@@ -658,16 +685,12 @@ else
                             </div>
                             <div class="col-12 col-lg-6">
                                 <p class="small text-muted mb-1">
-                                    Biểu đồ thể hiện tỷ lệ số đơn thành công theo từng kênh
-                                    (COD / VNPAY / ZALOPAY...).
+                                    Biểu đồ thể hiện tỷ lệ số đơn thành công theo từng kênh (COD / VNPAY / ZALOPAY...).
                                 </p>
                                 <ul class="small mb-0">
                                     @foreach (var p in providerRows)
                                     {
-                                        <li>
-                                            <strong>@p.ProviderLabel</strong> (@p.MethodLabel):
-                                            @p.SuccessfulOrders đơn
-                                        </li>
+                                        <li><strong>@p.ProviderLabel</strong> (@p.MethodLabel): @p.SuccessfulOrders đơn</li>
                                     }
                                 </ul>
                             </div>
@@ -686,18 +709,9 @@ else
         (function () {
             "use strict";
 
-            // ===== Helper cho date dd/MM/yyyy =====
-            function pad2(n) {
-                return n < 10 ? "0" + n : "" + n;
-            }
-
-            function formatDisplayDate(d) { // dd/MM/yyyy
-                return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear();
-            }
-
-            function formatHiddenDate(d) { // yyyy-MM-dd
-                return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
-            }
+            function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+            function formatDisplayDate(d) { return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear(); }
+            function formatHiddenDate(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
 
             function parseDisplayDate(str) {
                 if (!str) return null;
@@ -708,9 +722,7 @@ else
                 var yyyy = parseInt(m[3], 10);
                 if (MM < 1 || MM > 12 || dd < 1 || dd > 31) return null;
                 var d = new Date(yyyy, MM - 1, dd);
-                if (d.getFullYear() !== yyyy || d.getMonth() !== MM - 1 || d.getDate() !== dd) {
-                    return null;
-                }
+                if (d.getFullYear() !== yyyy || d.getMonth() !== MM - 1 || d.getDate() !== dd) return null;
                 return d;
             }
 
@@ -740,7 +752,6 @@ else
                 }
             }, true);
 
-            // ===== Preset range buttons =====
             function setRange(range) {
                 var form = document.querySelector(".cmstools-filter-row");
                 if (!form) return;
@@ -751,7 +762,6 @@ else
                 var toDisplay   = form.querySelector('.js-date-display[data-target-name="toDate"]');
                 var fromHidden  = form.querySelector('input[type="hidden"][name="fromDate"]');
                 var toHidden    = form.querySelector('input[type="hidden"][name="toDate"]');
-
                 if (!fromDisplay || !toDisplay || !fromHidden || !toHidden) return;
 
                 var today = new Date();
@@ -760,20 +770,16 @@ else
                 var from, to;
                 if (range === "last7") {
                     to = new Date(today);
-                    from = new Date(today);
-                    from.setDate(from.getDate() - 6);
+                    from = new Date(today); from.setDate(from.getDate() - 6);
                 } else if (range === "thisMonth") {
                     to = new Date(today);
                     from = new Date(today.getFullYear(), today.getMonth(), 1);
                 } else if (range === "lastMonth") {
                     var firstThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-                    var lastMonthEnd = new Date(firstThisMonth.getTime() - 86400000); // -1 day
+                    var lastMonthEnd = new Date(firstThisMonth.getTime() - 86400000);
                     var lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
-                    from = lastMonthStart;
-                    to = lastMonthEnd;
-                } else {
-                    return;
-                }
+                    from = lastMonthStart; to = lastMonthEnd;
+                } else return;
 
                 fromDisplay.value = formatDisplayDate(from);
                 toDisplay.value   = formatDisplayDate(to);
@@ -798,28 +804,21 @@ else
 
             function buildOrdersUrl(fromStr, toStr) {
                 var baseUrl = '@Url.Action("Index", "Orders")';
-                var url = baseUrl + "?deliveredFrom=" + encodeURIComponent(fromStr)
-                                  + "&deliveredTo=" + encodeURIComponent(toStr);
-                return url;
+                return baseUrl + "?deliveredFrom=" + encodeURIComponent(fromStr)
+                               + "&deliveredTo=" + encodeURIComponent(toStr);
             }
 
             function parseLabelToRange(label) {
-                // trả về { from: "yyyy-MM-dd", to: "yyyy-MM-dd" }
                 if (groupBy === "month") {
-                    // MM/yyyy
                     var partsM = label.split("/");
                     if (partsM.length !== 2) return null;
                     var mm = parseInt(partsM[0], 10);
                     var yyyy = parseInt(partsM[1], 10);
                     if (!mm || !yyyy) return null;
                     var from = new Date(yyyy, mm - 1, 1);
-                    var to = new Date(yyyy, mm, 0); // last day of month
-                    return {
-                        from: formatHiddenDate(from),
-                        to: formatHiddenDate(to)
-                    };
+                    var to = new Date(yyyy, mm, 0);
+                    return { from: formatHiddenDate(from), to: formatHiddenDate(to) };
                 } else {
-                    // dd/MM/yyyy
                     var partsD = label.split("/");
                     if (partsD.length !== 3) return null;
                     var dd = parseInt(partsD[0], 10);
@@ -827,10 +826,7 @@ else
                     var yyyy2 = parseInt(partsD[2], 10);
                     if (!dd || !mm2 || !yyyy2) return null;
                     var d = new Date(yyyy2, mm2 - 1, dd);
-                    return {
-                        from: formatHiddenDate(d),
-                        to: formatHiddenDate(d)
-                    };
+                    return { from: formatHiddenDate(d), to: formatHiddenDate(d) };
                 }
             }
 
@@ -846,50 +842,19 @@ else
                         data: {
                             labels: labels,
                             datasets: [
-                                {
-                                    type: "line",
-                                    label: "Doanh thu (pay_total)",
-                                    data: revenueData,
-                                    yAxisID: "yRevenue",
-                                    borderWidth: 2,
-                                    tension: 0.3,
-                                    pointRadius: 3
-                                },
-                                {
-                                    type: "bar",
-                                    label: "Số đơn",
-                                    data: ordersData,
-                                    yAxisID: "yOrders",
-                                    borderWidth: 1
-                                }
+                                { type: "line", label: "Doanh thu (pay_total)", data: revenueData, yAxisID: "yRevenue", borderWidth: 2, tension: 0.3, pointRadius: 3 },
+                                { type: "bar",  label: "Số đơn",              data: ordersData,  yAxisID: "yOrders",  borderWidth: 1 }
                             ]
                         },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
-                            interaction: {
-                                mode: "index",
-                                intersect: false
-                            },
+                            interaction: { mode: "index", intersect: false },
                             stacked: false,
                             scales: {
-                                yRevenue: {
-                                    type: "linear",
-                                    display: true,
-                                    position: "left",
-                                    title: { display: true, text: "Doanh thu (đ)" }
-                                },
-                                yOrders: {
-                                    type: "linear",
-                                    display: true,
-                                    position: "right",
-                                    grid: { drawOnChartArea: false },
-                                    title: { display: true, text: "Số đơn" },
-                                    ticks: { precision: 0 }
-                                },
-                                x: {
-                                    ticks: { maxRotation: 45, minRotation: 0 }
-                                }
+                                yRevenue: { type: "linear", display: true, position: "left", title: { display: true, text: "Doanh thu (đ)" } },
+                                yOrders:  { type: "linear", display: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "Số đơn" }, ticks: { precision: 0 } },
+                                x: { ticks: { maxRotation: 45, minRotation: 0 } }
                             },
                             plugins: {
                                 legend: { display: true },
@@ -909,27 +874,19 @@ else
                         }
                     });
 
-                    // Click vào cột/point để drill-down Orders
                     ctx.onclick = function (evt) {
-                        const points = chart.getElementsAtEventForMode(
-                            evt,
-                            "nearest",
-                            { intersect: true },
-                            true
-                        );
+                        const points = chart.getElementsAtEventForMode(evt, "nearest", { intersect: true }, true);
                         if (!points.length) return;
-                        const firstPoint = points[0];
-                        const idx = firstPoint.index;
+                        const idx = points[0].index;
                         const label = chart.data.labels[idx];
                         const range = parseLabelToRange(label);
                         if (!range) return;
-                        const url = buildOrdersUrl(range.from, range.to);
-                        window.location.href = url;
+                        window.location.href = buildOrdersUrl(range.from, range.to);
                     };
                 }
             }
 
-            // === Biểu đồ kênh thanh toán ===
+            // ===== Biểu đồ kênh thanh toán =====
             var hasProviderRows = @hasProviderRows.ToString().ToLower();
             if (hasProviderRows) {
                 const providerLabels  = @Html.Raw(providerLabelsJson);
@@ -940,13 +897,7 @@ else
                 if (ctxAmount) {
                     new Chart(ctxAmount, {
                         type: "doughnut",
-                        data: {
-                            labels: providerLabels,
-                            datasets: [{
-                                label: "Doanh thu (đ)",
-                                data: providerAmounts
-                            }]
-                        },
+                        data: { labels: providerLabels, datasets: [{ label: "Doanh thu (đ)", data: providerAmounts }] },
                         options: {
                             responsive: true,
                             plugins: {
@@ -956,8 +907,7 @@ else
                                         label: function (context) {
                                             const label = context.label || "";
                                             const value = context.parsed || 0;
-                                            return label + ": " +
-                                                value.toLocaleString("vi-VN") + " đ";
+                                            return label + ": " + value.toLocaleString("vi-VN") + " đ";
                                         }
                                     }
                                 }
@@ -970,13 +920,7 @@ else
                 if (ctxOrders) {
                     new Chart(ctxOrders, {
                         type: "doughnut",
-                        data: {
-                            labels: providerLabels,
-                            datasets: [{
-                                label: "Số đơn",
-                                data: providerOrders
-                            }]
-                        },
+                        data: { labels: providerLabels, datasets: [{ label: "Số đơn", data: providerOrders }] },
                         options: {
                             responsive: true,
                             plugins: {

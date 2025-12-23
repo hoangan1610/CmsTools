@@ -100,7 +100,8 @@ namespace CmsTools.Controllers
 SELECT TOP 1 t.id
 FROM dbo.tbl_cms_table t
 JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
-WHERE t.schema_name = @schemaName
+WHERE c.[name]      = @connName          -- ✅ FIX: lọc đúng connection
+  AND t.schema_name = @schemaName
   AND t.table_name  = @tableName
   AND t.is_enabled  = 1
   AND c.is_active   = 1
@@ -108,6 +109,7 @@ ORDER BY t.id;";
 
             var id = await conn.ExecuteScalarAsync<int?>(sql, new
             {
+                connName = META_CONN_NAME,        // ✅ dùng const của bạn
                 schemaName = META_SCHEMA,
                 tableName = META_TABLE
             });
@@ -115,6 +117,7 @@ ORDER BY t.id;";
             _articleTableIdCache = id ?? 0;
             return _articleTableIdCache.Value;
         }
+
 
 
         private async Task<CmsTablePermission> GetArticlePermissionAsync()
@@ -154,7 +157,8 @@ ORDER BY t.id;";
         }
 
         private bool IsStatusAction(string action)
-            => action == "Publish" || action == "Schedule" || action == "Archive";
+    => action == "Publish" || action == "Schedule" || action == "Archive" || action == "CancelSchedule";
+
 
         private bool HasStatusPermission(CmsTablePermission p, string action)
         {
@@ -162,10 +166,12 @@ ORDER BY t.id;";
             {
                 "Publish" => p.CanPublish,
                 "Schedule" => p.CanSchedule,
+                "CancelSchedule" => p.CanSchedule,
                 "Archive" => p.CanArchive,
                 _ => true
             };
         }
+
 
         // =========================
         // LIST
@@ -360,27 +366,30 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AutoSaveDraft(
-            long id,
-            string title,
-            string? slug,
-            string? excerpt,
-            string? cover_image_url,
-            string content_html,
-            bool is_featured,
-            int? featured_order,
-            string? meta_title,
-            string? meta_description,
-            string? og_image_url,
-            string? canonical_url,
-            string? category_ids_csv,
-            string? tag_ids_csv,
-            string? cards_json,
-            string? scheduled_at_vn,
-            string? concurrency_token
-        )
+     long id,
+     string title,
+     string? slug,
+     string? excerpt,
+     string? cover_image_url,
+     string content_html,
+     bool is_featured,
+     int? featured_order,
+     string? meta_title,
+     string? meta_description,
+     string? og_image_url,
+     string? canonical_url,
+     string? category_ids_csv,
+     string? tag_ids_csv,
+     string? cards_json,
+     string? scheduled_at_vn, // (autosave bỏ gửi, nhưng giữ param cho binder không lỗi)
+     string? concurrency_token
+ )
         {
-            // autosave = draft
-            var action = "SaveDraft";
+            // ✅ autosave KHÔNG đổi status/schedule/publish
+            var action = "AutoSave";
+
+            // ✅ chủ động bỏ schedule nếu client lỡ gửi
+            scheduled_at_vn = null;
 
             return await SaveCore(
                 id, title, slug, excerpt, cover_image_url,
@@ -392,6 +401,7 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
                 isAutoSave: true
             );
         }
+
 
         // =========================
         // UPLOAD IMAGE (CSRF OK)
@@ -485,33 +495,32 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
         // SAVE CORE (shared)
         // =========================
         private async Task<IActionResult> SaveCore(
-            long id,
-            string title,
-            string? slug,
-            string? excerpt,
-            string? cover_image_url,
-            string content_html,
-            bool is_featured,
-            int? featured_order,
-            string? meta_title,
-            string? meta_description,
-            string? og_image_url,
-            string? canonical_url,
-            string? category_ids_csv,
-            string? tag_ids_csv,
-            string? cards_json,
-            string? scheduled_at_vn,
-            string action,
-            string? concurrency_token,
-            bool isAutoSave
-        )
+    long id,
+    string title,
+    string? slug,
+    string? excerpt,
+    string? cover_image_url,
+    string content_html,
+    bool is_featured,
+    int? featured_order,
+    string? meta_title,
+    string? meta_description,
+    string? og_image_url,
+    string? canonical_url,
+    string? category_ids_csv,
+    string? tag_ids_csv,
+    string? cards_json,
+    string? scheduled_at_vn,
+    string action,
+    string? concurrency_token,
+    bool isAutoSave
+
+)
         {
             // ===== CHECK PERMISSION =====
             var p = await GetArticlePermissionAsync();
             var isCreate = id <= 0;
 
-            // Draft/SaveDraft: cần Create hoặc Update
-            // Publish/Schedule/Archive: cần quyền riêng + vẫn cần Create/Update tương ứng
             if (IsStatusAction(action))
             {
                 if (!HasStatusPermission(p, action))
@@ -538,7 +547,7 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
                 }
             }
 
-            // ===== ORIGINAL LOGIC (giữ của bạn) =====
+            // ===== ORIGINAL LOGIC =====
             title = (title ?? "").Trim();
             slug = (slug ?? "").Trim();
             excerpt = string.IsNullOrWhiteSpace(excerpt) ? null : excerpt.Trim();
@@ -565,7 +574,8 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
                     ParseCards(cards_json)
                 );
 
-                return await FailView(conn0, id, isAutoSave, "Title is required.", vm0);
+                return await FailView(conn0, id, isAutoSave, "Title is required.", vm0, p);
+
             }
 
             if (string.IsNullOrWhiteSpace(slug))
@@ -573,18 +583,28 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
             else
                 slug = Slugify(slug);
 
-            byte newStatus = action switch
+            byte? newStatus = action switch
             {
                 "Publish" => (byte)1,
                 "Schedule" => (byte)2,
                 "Archive" => (byte)3,
-                _ => (byte)0
+                "CancelSchedule" => (byte)0,
+                "AutoSave" => null,
+                _ => null // ✅ giữ nguyên status
             };
+
 
             DateTime? scheduledUtc = null;
             DateTime? publishedUtc = null;
 
-            if (newStatus == 2)
+            // CancelSchedule: clear lịch
+            if (newStatus.HasValue && newStatus.Value == 1) // Publish
+            {
+                publishedUtc = DateTime.UtcNow;
+                scheduledUtc = null; // publish => clear lịch
+            }
+
+            else if (newStatus.HasValue && newStatus.Value == 2) // Schedule
             {
                 if (string.IsNullOrWhiteSpace(scheduled_at_vn))
                     return Fail(id, isAutoSave, "Cần chọn thời gian hẹn đăng.");
@@ -602,27 +622,26 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
                 if (scheduledUtc <= DateTime.UtcNow.AddSeconds(60))
                     return Fail(id, isAutoSave, "Thời gian hẹn đăng phải ở tương lai.");
             }
-            else
+            else if (newStatus.HasValue)
             {
-                if (!string.IsNullOrWhiteSpace(scheduled_at_vn))
-                {
-                    if (!DateTime.TryParseExact(
-                            scheduled_at_vn,
-                            new[] { "yyyy-MM-ddTHH:mm", "yyyy-MM-ddTHH:mm:ss" },
-                            CultureInfo.InvariantCulture,
-                            DateTimeStyles.None,
-                            out var vnLocal))
-                        return Fail(id, isAutoSave, "Thời gian hẹn đăng không hợp lệ.");
-
-                    scheduledUtc = VnToUtc(vnLocal);
-                }
-            }
-
-            if (newStatus == 1)
-            {
-                publishedUtc = DateTime.UtcNow;
+                // Không tự đụng schedule ở các action khác
                 scheduledUtc = null;
             }
+            if (action == "CancelSchedule")
+                if (newStatus.HasValue && newStatus.Value == 1) // Publish
+            {
+                publishedUtc = DateTime.UtcNow;
+                scheduledUtc = null; // publish => clear lịch
+            }
+
+            // ✅ QUAN TRỌNG: chỉ update 2 cột time khi đúng action
+            var touchPublished = string.Equals(action, "Publish", StringComparison.OrdinalIgnoreCase);
+            var touchScheduled =
+    string.Equals(action, "Schedule", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(action, "CancelSchedule", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(action, "Publish", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(action, "Archive", StringComparison.OrdinalIgnoreCase); // ✅ NEW
+
 
             var catIds = ParseIds(category_ids_csv);
             var tagIds = ParseIds(tag_ids_csv);
@@ -644,9 +663,18 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
             await using var conn = OpenHaf();
             await conn.OpenAsync();
             await using var tx = await conn.BeginTransactionAsync();
+            ArticleAuditSnapshot? auditOld = null;
+            string auditOp = "UPDATE";
+
 
             try
             {
+                // ===== AUDIT: snapshot trước khi sửa =====
+                if (id > 0)
+                {
+                    auditOld = await FetchArticleSnapshotAsync(conn, tx, id);
+                }
+
                 var slugExists = await conn.ExecuteScalarAsync<long?>(new CommandDefinition(@"
 SELECT TOP 1 id
 FROM dbo.tbl_article
@@ -656,10 +684,20 @@ WHERE is_deleted=0 AND language_code=@lang AND slug=@slug AND id<>@id;",
                 if (slugExists != null)
                 {
                     await tx.RollbackAsync();
-                    return isAutoSave
-                        ? BadRequest(new { ok = false, message = "Slug đã tồn tại. Hãy đổi slug khác." })
-                        : BadRequest("Slug đã tồn tại. Hãy đổi slug khác.");
+
+                    // ✅ trả về Edit view để giữ dữ liệu user đang nhập
+                    var vmSlug = BuildVmFromPost(
+                        id, title, slug, excerpt, cover_image_url,
+                        content_html, is_featured, featured_order,
+                        meta_title, meta_description, og_image_url, canonical_url,
+                        category_ids_csv, tag_ids_csv, scheduled_at_vn,
+                        concurrency_token,
+                        ParseCards(cards_json)
+                    );
+
+                    return await FailView(conn, id, isAutoSave, "Slug đã tồn tại. Hãy đổi slug khác.", vmSlug, p);
                 }
+
 
                 string? oldSlug = null;
                 if (id > 0)
@@ -704,9 +742,10 @@ SELECT TOP 1 id, row_version FROM @t;";
                         cover = cover_image_url,
                         content_html = safeHtml,
                         content_json = emptyEditorJson,
-                        status = newStatus,
+                        status = newStatus ?? (byte)0,
                         published = publishedUtc,
                         scheduled = scheduledUtc,
+
                         is_featured,
                         featured_order,
                         meta_title,
@@ -723,7 +762,7 @@ SELECT TOP 1 id, row_version FROM @t;";
                 }
                 else
                 {
-                    const string sqlUpdate = @"
+                    const string sqlUpdateAutoSave = @"
 DECLARE @t TABLE (row_version VARBINARY(8));
 
 UPDATE dbo.tbl_article
@@ -733,10 +772,6 @@ SET
   excerpt=@excerpt,
   cover_image_url=@cover,
   content_html=@content_html,
-
-  status=@status,
-  published_at_utc = CASE WHEN @status=1 THEN COALESCE(@published, published_at_utc) ELSE published_at_utc END,
-  scheduled_at_utc = CASE WHEN @status=1 THEN NULL ELSE @scheduled END,
 
   is_featured=@is_featured,
   featured_order=@featured_order,
@@ -754,30 +789,76 @@ WHERE id=@id AND is_deleted=0
 
 SELECT TOP 1 row_version FROM @t;";
 
-                    newRv = await conn.QueryFirstOrDefaultAsync<byte[]?>(new CommandDefinition(sqlUpdate, new
-                    {
-                        id,
-                        title,
-                        slug,
-                        excerpt,
-                        cover = cover_image_url,
-                        content_html = safeHtml,
+                    // ✅ FIX: không set NULL published/scheduled nữa khi save bình thường
+                    const string sqlUpdateFull = @"
+DECLARE @t TABLE (row_version VARBINARY(8));
 
-                        status = newStatus,
-                        published = publishedUtc,
-                        scheduled = scheduledUtc,
+UPDATE dbo.tbl_article
+SET
+  title=@title,
+  slug=@slug,
+  excerpt=@excerpt,
+  cover_image_url=@cover,
+  content_html=@content_html,
 
-                        is_featured,
-                        featured_order,
+  status=@status,
 
-                        meta_title,
-                        meta_desc = meta_description,
-                        og = og_image_url,
-                        canonical = canonical_url,
+  published_at_utc = CASE WHEN @touch_published = 1 THEN @published ELSE published_at_utc END,
+  scheduled_at_utc = CASE WHEN @touch_scheduled = 1 THEN @scheduled ELSE scheduled_at_utc END,
 
-                        user_update = userName,
-                        client_rv = clientRv
-                    }, transaction: tx));
+  is_featured=@is_featured,
+  featured_order=@featured_order,
+
+  meta_title=@meta_title,
+  meta_description=@meta_desc,
+  og_image_url=@og,
+  canonical_url=@canonical,
+
+  user_update=@user_update,
+  updated_at_utc=SYSUTCDATETIME()
+OUTPUT INSERTED.row_version INTO @t(row_version)
+WHERE id=@id AND is_deleted=0
+  AND (@client_rv IS NULL OR row_version=@client_rv);
+
+SELECT TOP 1 row_version FROM @t;";
+
+                    var sqlToRun = string.Equals(action, "AutoSave", StringComparison.OrdinalIgnoreCase)
+                        ? sqlUpdateAutoSave
+                        : sqlUpdateFull;
+
+                    var statusForFull = newStatus ?? (auditOld?.Status ?? (byte)0);
+
+
+                    newRv = await conn.QueryFirstOrDefaultAsync<byte[]?>(
+                        new CommandDefinition(sqlToRun, new
+                        {
+                            id,
+                            title,
+                            slug,
+                            excerpt,
+                            cover = cover_image_url,
+                            content_html = safeHtml,
+
+                            status = statusForFull,
+                            published = publishedUtc,
+                            scheduled = scheduledUtc,
+
+                            // ✅ thêm 2 param này
+                            touch_published = touchPublished ? 1 : 0,
+                            touch_scheduled = touchScheduled ? 1 : 0,
+
+                            is_featured,
+                            featured_order,
+
+                            meta_title,
+                            meta_desc = meta_description,
+                            og = og_image_url,
+                            canonical = canonical_url,
+
+                            user_update = userName,
+                            client_rv = clientRv
+                        }, transaction: tx)
+                    );
 
                     if (clientRv != null && (newRv == null || newRv.Length == 0))
                     {
@@ -800,6 +881,9 @@ WHERE id=@id AND is_deleted=0 AND (content_json IS NULL OR ISJSON(content_json)<
                             new { id }, transaction: tx));
                     }
                 }
+
+                // (phần còn lại bạn giữ y chang: redirect slug, map category/tag/cards, search_text, commit...)
+                // ===== giữ nguyên như code của bạn =====
 
                 if (id > 0 && !string.IsNullOrWhiteSpace(oldSlug) && !string.Equals(oldSlug, slug, StringComparison.OrdinalIgnoreCase))
                 {
@@ -935,7 +1019,81 @@ END";
                     content_text = contentText
                 }, transaction: tx));
 
+                // ===== AUDIT: xác định operation + snapshot mới =====
+                auditOp = action switch
+                {
+                    "Publish" => "PUBLISH",
+                    "Schedule" => "SCHEDULE",
+                    "CancelSchedule" => "CANCEL_SCHEDULE",
+                    "Archive" => "ARCHIVE",
+                    "AutoSave" => "AUTOSAVE",
+                    _ => (isCreate ? "INSERT" : "UPDATE")
+                };
+
+
                 await tx.CommitAsync();
+
+                // ===== AUDIT: ghi log sau khi commit (best-effort) =====
+                try
+                {
+                    // userId
+                    var cmsUid = await GetCmsUserIdAsync();
+                    int? uidNullable = cmsUid > 0 ? cmsUid : (int?)null;
+
+                    // tính "giá trị mới" theo đúng logic touchPublished/touchScheduled
+                    // nếu update: những field không touch thì giữ theo old
+                    var oldPub = auditOld?.Published_At_Utc;
+                    var oldSch = auditOld?.Scheduled_At_Utc;
+
+                    var newPub = isCreate ? publishedUtc : (touchPublished ? publishedUtc : oldPub);
+                    var newSch = isCreate ? scheduledUtc : (touchScheduled ? scheduledUtc : oldSch);
+
+                    var newStatusFinal = isCreate
+                        ? (newStatus ?? (byte)0)
+                        : (string.Equals(action, "AutoSave", StringComparison.OrdinalIgnoreCase)
+                            ? (auditOld?.Status ?? (byte)0)
+                            : (newStatus ?? (auditOld?.Status ?? (byte)0)));
+
+
+                    var auditNew = BuildNewSnapshotFromPost(
+                        id,
+                        title,
+                        slug!,
+                        excerpt,
+                        cover_image_url,
+                        safeHtml,
+                        newStatusFinal,
+                        newPub,
+                        newSch,
+                        is_featured,
+                        featured_order,
+                        meta_title,
+                        meta_description,
+                        og_image_url,
+                        canonical_url,
+                        catIds,
+                        tagIds,
+                        cards
+                    );
+
+                    var (oldV, newV) = BuildDiff(auditOld, auditNew);
+
+                    await WriteAuditAsync(
+                        uidNullable,
+                        auditOp,
+                        connectionName: META_CONN_NAME,
+                        schemaName: META_SCHEMA,
+                        tableName: META_TABLE,
+                        pkColumn: "id",
+                        pkValue: id.ToString(),
+                        oldValuesJson: ToJsonOrNull(oldV),
+                        newValuesJson: ToJsonOrNull(newV)
+                    );
+                }
+                catch
+                {
+                    // ignore
+                }
 
                 var tokenOut = (newRv != null && newRv.Length > 0) ? Convert.ToBase64String(newRv) : null;
 
@@ -959,9 +1117,23 @@ END";
                 await tx.RollbackAsync();
 
                 if (ex.Number is 2601 or 2627)
-                    return isAutoSave
-                        ? BadRequest(new { ok = false, message = "Slug đã tồn tại. Hãy đổi slug khác." })
-                        : BadRequest("Slug đã tồn tại. Hãy đổi slug khác.");
+                {
+                    if (isAutoSave)
+                        return BadRequest(new { ok = false, message = "Slug đã tồn tại. Hãy đổi slug khác." });
+
+                    // ✅ trả về Edit view để giữ form
+                    var vmSlug = BuildVmFromPost(
+                        id, title, slug, excerpt, cover_image_url,
+                        content_html, is_featured, featured_order,
+                        meta_title, meta_description, og_image_url, canonical_url,
+                        category_ids_csv, tag_ids_csv, scheduled_at_vn,
+                        concurrency_token,
+                        ParseCards(cards_json)
+                    );
+
+                    return await FailView(conn, id, isAutoSave, "Slug đã tồn tại. Hãy đổi slug khác.", vmSlug, p);
+                }
+
 
                 return isAutoSave
                     ? BadRequest(new { ok = false, message = ex.Message })
@@ -975,6 +1147,7 @@ END";
                     : BadRequest(ex.Message);
             }
         }
+
 
         // =========================
         // Product search for cards (AJAX)
@@ -1324,21 +1497,21 @@ ORDER BY id DESC;";
             return RedirectToAction("Edit");
         }
 
-        private async Task FillCatTagOptions(SqlConnection conn, CmsArticleEditVm vm, SqlTransaction? tx = null)
+        private async Task FillCatTagOptions(SqlConnection conn, CmsArticleEditVm vm, IDbTransaction? tx = null)
         {
             vm.Category_Options = (await conn.QueryAsync<CmsOptionVm>(
                 @"SELECT id, name
-                  FROM dbo.tbl_article_category
-                  WHERE is_deleted=0 AND is_active=1
-                  ORDER BY sort_order, id",
+          FROM dbo.tbl_article_category
+          WHERE is_deleted=0 AND is_active=1
+          ORDER BY sort_order, id",
                 transaction: tx
             )).ToList();
 
             vm.Tag_Options = (await conn.QueryAsync<CmsOptionVm>(
                 @"SELECT id, name
-                  FROM dbo.tbl_article_tag
-                  WHERE is_deleted=0 AND is_active=1
-                  ORDER BY sort_order, id",
+          FROM dbo.tbl_article_tag
+          WHERE is_deleted=0 AND is_active=1
+          ORDER BY sort_order, id",
                 transaction: tx
             )).ToList();
 
@@ -1346,16 +1519,18 @@ ORDER BY id DESC;";
             vm.Tag_Options ??= new List<CmsOptionVm>();
         }
 
+
         private bool IsAdmin()
     => User?.HasClaim("cms_is_admin", "1") == true;
 
         private async Task<IActionResult> FailView(
-            SqlConnection conn,
-            long id,
-            bool isAutoSave,
-            string message,
-            CmsArticleEditVm vm,
-            int? statusCode = null)
+    SqlConnection conn,
+    long id,
+    bool isAutoSave,
+    string message,
+    CmsArticleEditVm vm,
+    CmsTablePermission perm,          // ✅ NEW
+    int? statusCode = null)
         {
             if (isAutoSave)
             {
@@ -1366,9 +1541,13 @@ ORDER BY id DESC;";
 
             TempData["CmsError"] = message;
 
+            // ✅ QUAN TRỌNG: set permission lại để View hiển thị đúng nút
+            ViewBag.ArticlePerm = perm;
+
             await FillCatTagOptions(conn, vm);
             return View("Edit", vm);
         }
+
 
         private CmsArticleEditVm BuildVmFromPost(
             long id,
@@ -1424,5 +1603,521 @@ ORDER BY id DESC;";
 
             return vm;
         }
+        // =========================
+        // AUDIT LOG HELPERS
+        // =========================
+
+        private sealed class ArticleAuditSnapshot
+        {
+            public long Id { get; set; }
+            public string? Title { get; set; }
+            public string? Slug { get; set; }
+            public string? Excerpt { get; set; }
+            public string? Cover_Image_Url { get; set; }
+            public byte Status { get; set; }
+            public DateTime? Published_At_Utc { get; set; }
+            public DateTime? Scheduled_At_Utc { get; set; }
+            public bool Is_Featured { get; set; }
+            public int? Featured_Order { get; set; }
+            public string? Meta_Title { get; set; }
+            public string? Meta_Description { get; set; }
+            public string? Og_Image_Url { get; set; }
+            public string? Canonical_Url { get; set; }
+
+            // không lưu html full -> lưu hash + len cho nhẹ
+            public string? Content_Hash { get; set; }
+            public int Content_Len { get; set; }
+
+            public List<long> Category_Ids { get; set; } = new();
+            public List<long> Tag_Ids { get; set; } = new();
+
+            // cards: chỉ lưu key
+            public List<object> Cards { get; set; } = new();
+        }
+
+        private static string Sha256Hex(string? s)
+        {
+            s ??= "";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(s));
+            var sb = new StringBuilder(bytes.Length * 2);
+            foreach (var b in bytes) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+
+        private async Task<ArticleAuditSnapshot?> FetchArticleSnapshotAsync(
+    SqlConnection conn,
+    IDbTransaction tx,
+    long id)
+        {
+            const string sql = @"
+SELECT TOP 1
+  id, title, slug, excerpt, cover_image_url,
+  content_html,
+  status, published_at_utc, scheduled_at_utc,
+  is_featured, featured_order,
+  meta_title, meta_description, og_image_url, canonical_url
+FROM dbo.tbl_article
+WHERE id=@id AND is_deleted=0;";
+
+            var row = await conn.QueryFirstOrDefaultAsync(sql, new { id }, tx);
+            if (row == null) return null;
+
+            string html = "";
+            try { html = (string?)row.content_html ?? ""; } catch { html = ""; }
+
+            var snap = new ArticleAuditSnapshot
+            {
+                Id = (long)row.id,
+                Title = (string?)row.title,
+                Slug = (string?)row.slug,
+                Excerpt = (string?)row.excerpt,
+                Cover_Image_Url = (string?)row.cover_image_url,
+                Status = (byte)row.status,
+                Published_At_Utc = row.published_at_utc as DateTime?,
+                Scheduled_At_Utc = row.scheduled_at_utc as DateTime?,
+                Is_Featured = (bool)row.is_featured,
+                Featured_Order = row.featured_order as int?,
+                Meta_Title = (string?)row.meta_title,
+                Meta_Description = (string?)row.meta_description,
+                Og_Image_Url = (string?)row.og_image_url,
+                Canonical_Url = (string?)row.canonical_url,
+                Content_Len = html.Length,
+                Content_Hash = Sha256Hex(html),
+            };
+
+            snap.Category_Ids = (await conn.QueryAsync<long>(
+                @"SELECT category_id
+          FROM dbo.tbl_article_category_map
+          WHERE article_id=@id
+          ORDER BY sort_order, category_id;",
+                new { id }, tx)).ToList();
+
+            snap.Tag_Ids = (await conn.QueryAsync<long>(
+                @"SELECT tag_id
+          FROM dbo.tbl_article_tag_map
+          WHERE article_id=@id
+          ORDER BY sort_order, tag_id;",
+                new { id }, tx)).ToList();
+
+            var cards = await conn.QueryAsync(@"
+SELECT product_id, variant_id, sort_order
+FROM dbo.tbl_article_product_map
+WHERE article_id=@id
+ORDER BY sort_order, id;", new { id }, tx);
+
+            snap.Cards = cards.Select(x => new
+            {
+                product_id = (long)x.product_id,
+                variant_id = (long?)x.variant_id,
+                sort_order = (int)x.sort_order
+            }).Cast<object>().ToList();
+
+            return snap;
+        }
+
+        private ArticleAuditSnapshot BuildNewSnapshotFromPost(
+            long id,
+            string title,
+            string slug,
+            string? excerpt,
+            string? coverImageUrl,
+            string safeHtml,
+            byte status,
+            DateTime? publishedAtUtc,
+            DateTime? scheduledAtUtc,
+            bool isFeatured,
+            int? featuredOrder,
+            string? metaTitle,
+            string? metaDesc,
+            string? ogImage,
+            string? canonical,
+            List<long> catIds,
+            List<long> tagIds,
+            List<CmsArticleCardVm> cards
+        )
+        {
+            return new ArticleAuditSnapshot
+            {
+                Id = id,
+                Title = title,
+                Slug = slug,
+                Excerpt = excerpt,
+                Cover_Image_Url = coverImageUrl,
+                Status = status,
+                Published_At_Utc = publishedAtUtc,
+                Scheduled_At_Utc = scheduledAtUtc,
+                Is_Featured = isFeatured,
+                Featured_Order = featuredOrder,
+                Meta_Title = metaTitle,
+                Meta_Description = metaDesc,
+                Og_Image_Url = ogImage,
+                Canonical_Url = canonical,
+                Content_Len = (safeHtml ?? "").Length,
+                Content_Hash = Sha256Hex(safeHtml),
+                Category_Ids = catIds ?? new(),
+                Tag_Ids = tagIds ?? new(),
+                Cards = (cards ?? new())
+                    .OrderBy(x => x.Sort_Order)
+                    .Select(x => new { product_id = x.Product_Id, variant_id = x.Variant_Id, sort_order = x.Sort_Order })
+                    .Cast<object>()
+                    .ToList()
+            };
+        }
+
+        private static (Dictionary<string, object?> oldV, Dictionary<string, object?> newV) BuildDiff(ArticleAuditSnapshot? oldS, ArticleAuditSnapshot newS)
+        {
+            var oldV = new Dictionary<string, object?>();
+            var newV = new Dictionary<string, object?>();
+
+            void AddIfChanged(string k, object? o, object? n)
+            {
+                // so sánh đơn giản
+                if ((o == null && n == null) || (o != null && o.Equals(n))) return;
+                oldV[k] = o;
+                newV[k] = n;
+            }
+
+            // nếu create thì log “new” full, old rỗng
+            if (oldS == null)
+            {
+                newV["id"] = newS.Id;
+                newV["title"] = newS.Title;
+                newV["slug"] = newS.Slug;
+                newV["excerpt"] = newS.Excerpt;
+                newV["cover_image_url"] = newS.Cover_Image_Url;
+                newV["status"] = newS.Status;
+                newV["published_at_utc"] = newS.Published_At_Utc;
+                newV["scheduled_at_utc"] = newS.Scheduled_At_Utc;
+                newV["is_featured"] = newS.Is_Featured;
+                newV["featured_order"] = newS.Featured_Order;
+                newV["meta_title"] = newS.Meta_Title;
+                newV["meta_description"] = newS.Meta_Description;
+                newV["og_image_url"] = newS.Og_Image_Url;
+                newV["canonical_url"] = newS.Canonical_Url;
+                newV["content_hash"] = newS.Content_Hash;
+                newV["content_len"] = newS.Content_Len;
+                newV["category_ids"] = newS.Category_Ids;
+                newV["tag_ids"] = newS.Tag_Ids;
+                newV["cards"] = newS.Cards;
+                return (oldV, newV);
+            }
+
+            AddIfChanged("title", oldS.Title, newS.Title);
+            AddIfChanged("slug", oldS.Slug, newS.Slug);
+            AddIfChanged("excerpt", oldS.Excerpt, newS.Excerpt);
+            AddIfChanged("cover_image_url", oldS.Cover_Image_Url, newS.Cover_Image_Url);
+            AddIfChanged("status", oldS.Status, newS.Status);
+            AddIfChanged("published_at_utc", oldS.Published_At_Utc, newS.Published_At_Utc);
+            AddIfChanged("scheduled_at_utc", oldS.Scheduled_At_Utc, newS.Scheduled_At_Utc);
+            AddIfChanged("is_featured", oldS.Is_Featured, newS.Is_Featured);
+            AddIfChanged("featured_order", oldS.Featured_Order, newS.Featured_Order);
+            AddIfChanged("meta_title", oldS.Meta_Title, newS.Meta_Title);
+            AddIfChanged("meta_description", oldS.Meta_Description, newS.Meta_Description);
+            AddIfChanged("og_image_url", oldS.Og_Image_Url, newS.Og_Image_Url);
+            AddIfChanged("canonical_url", oldS.Canonical_Url, newS.Canonical_Url);
+
+            // content: so theo hash/len
+            AddIfChanged("content_hash", oldS.Content_Hash, newS.Content_Hash);
+            AddIfChanged("content_len", oldS.Content_Len, newS.Content_Len);
+
+            // list compare
+            string CatKey(List<long> x) => string.Join(",", (x ?? new()).OrderBy(i => i));
+            AddIfChanged("category_ids", CatKey(oldS.Category_Ids), CatKey(newS.Category_Ids));
+
+            string TagKey(List<long> x) => string.Join(",", (x ?? new()).OrderBy(i => i));
+            AddIfChanged("tag_ids", TagKey(oldS.Tag_Ids), TagKey(newS.Tag_Ids));
+
+            string CardsKey(List<object> x)
+                => JsonSerializer.Serialize(x ?? new(), new JsonSerializerOptions { WriteIndented = false });
+
+            AddIfChanged("cards", CardsKey(oldS.Cards), CardsKey(newS.Cards));
+
+            return (oldV, newV);
+        }
+
+        private string GetClientIp()
+        {
+            // ưu tiên X-Forwarded-For (nếu bạn có reverse proxy)
+            var xff = Request.Headers["X-Forwarded-For"].ToString();
+            if (!string.IsNullOrWhiteSpace(xff))
+                return xff.Split(',')[0].Trim();
+
+            return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+        }
+
+        private async Task WriteAuditAsync(
+            int? userId,
+            string operation,
+            string connectionName,
+            string schemaName,
+            string tableName,
+            string pkColumn,
+            string pkValue,
+            string? oldValuesJson,
+            string? newValuesJson
+        )
+        {
+            try
+            {
+                var ip = GetClientIp();
+                var ua = Request.Headers["User-Agent"].ToString();
+
+                await using var conn = OpenMeta();
+                await conn.OpenAsync();
+
+                const string sql = @"
+INSERT INTO dbo.tbl_cms_audit_log
+(user_id, operation, connection_name, schema_name, table_name,
+ primary_key_column, primary_key_value,
+ ip_address, user_agent, old_values, new_values, created_at_utc)
+VALUES
+(@user_id, @operation, @conn, @schema, @table,
+ @pkc, @pkv,
+ @ip, @ua, @oldv, @newv, SYSUTCDATETIME());";
+
+                await conn.ExecuteAsync(sql, new
+                {
+                    user_id = userId,
+                    operation,
+                    conn = connectionName,
+                    schema = schemaName,
+                    table = tableName,
+                    pkc = pkColumn,
+                    pkv = pkValue,
+                    ip,
+                    ua,
+                    oldv = oldValuesJson,
+                    newv = newValuesJson
+                });
+            }
+            catch
+            {
+                // best-effort: không làm hỏng flow lưu bài
+            }
+        }
+
+        private static string? ToJsonOrNull(object obj)
+        {
+            // nếu rỗng thì trả null để DB gọn
+            if (obj is Dictionary<string, object?> d && d.Count == 0) return null;
+            return JsonSerializer.Serialize(obj, new JsonSerializerOptions
+            {
+                WriteIndented = false
+            });
+        }
+        // =========================
+        // COPY / DUPLICATE ARTICLE
+        // =========================
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Copy(long id)
+        {
+            var p = await GetArticlePermissionAsync();
+            if (!p.CanCreate) return Forbid();
+            if (id <= 0) return NotFound("Thiếu id bài viết.");
+
+            const string lang = "vi";
+            const string emptyEditorJson = "{\"time\":0,\"blocks\":[],\"version\":\"2\"}";
+
+            var userName = User?.Identity?.Name;
+            if (string.IsNullOrWhiteSpace(userName))
+                userName = User?.FindFirstValue(ClaimTypes.Name) ?? "cms";
+
+            await using var conn = OpenHaf();
+            await conn.OpenAsync();
+            await using var tx = await conn.BeginTransactionAsync();
+
+            try
+            {
+                // 1) Lấy bài gốc
+                const string sqlSrc = @"
+SELECT TOP 1
+  id, title, slug, excerpt, cover_image_url,
+  content_html, content_json,
+  status, published_at_utc, scheduled_at_utc,
+  is_featured, featured_order,
+  meta_title, meta_description, og_image_url, canonical_url
+FROM dbo.tbl_article
+WHERE id=@id AND is_deleted=0;";
+
+                var src = await conn.QueryFirstOrDefaultAsync(sqlSrc, new { id }, tx);
+                if (src == null)
+                {
+                    await tx.RollbackAsync();
+                    return NotFound("Không tìm thấy bài viết gốc.");
+                }
+
+                string srcTitle = (string?)src.title ?? "";
+                string srcSlug = (string?)src.slug ?? "";
+
+                // 2) Title/Slug mới
+                var newTitle = string.IsNullOrWhiteSpace(srcTitle) ? "Bài viết (Copy)" : (srcTitle + " (Copy)");
+                var baseSlug = !string.IsNullOrWhiteSpace(srcSlug) ? (srcSlug + "-copy") : Slugify(newTitle);
+                var newSlug = await EnsureUniqueSlugAsync(conn, tx, baseSlug, lang);
+
+                // 3) Insert bài mới (Draft)
+                const string sqlInsert = @"
+DECLARE @t TABLE (id BIGINT, row_version VARBINARY(8));
+
+INSERT INTO dbo.tbl_article
+(title, slug, excerpt, cover_image_url,
+ content_html, content_json,
+ status, published_at_utc, scheduled_at_utc,
+ is_featured, featured_order,
+ meta_title, meta_description, og_image_url, canonical_url,
+ language_code, user_create, user_update,
+ created_at_utc, updated_at_utc, is_deleted)
+OUTPUT INSERTED.id, INSERTED.row_version INTO @t(id, row_version)
+VALUES
+(@title, @slug, @excerpt, @cover,
+ @content_html, @content_json,
+ @status, NULL, NULL,
+ @is_featured, @featured_order,
+ @meta_title, @meta_desc, @og, @canonical,
+ @lang, @user_create, @user_update,
+ SYSUTCDATETIME(), SYSUTCDATETIME(), 0);
+
+SELECT TOP 1 id, row_version FROM @t;";
+
+                // content_json: giữ cái gốc nếu có, không thì set empty json
+                string contentJson = (string?)src.content_json ?? "";
+                if (string.IsNullOrWhiteSpace(contentJson)) contentJson = emptyEditorJson;
+
+                // content_html: dùng y như gốc nhưng sanitize lại cho chắc (đúng chuẩn flow của bạn)
+                string contentHtml = SanitizeHtml((string?)src.content_html ?? "");
+
+                var inserted = await conn.QueryFirstAsync(sqlInsert, new
+                {
+                    title = newTitle,
+                    slug = newSlug,
+                    excerpt = (string?)src.excerpt,
+                    cover = (string?)src.cover_image_url,
+                    content_html = contentHtml,
+                    content_json = contentJson,
+                    status = (byte)0, // Draft
+                    is_featured = (bool)src.is_featured,
+                    featured_order = (int?)src.featured_order,
+                    meta_title = (string?)src.meta_title,
+                    meta_desc = (string?)src.meta_description,
+                    og = (string?)src.og_image_url,
+                    canonical = (string?)src.canonical_url,
+                    lang,
+                    user_create = userName,
+                    user_update = userName
+                }, tx);
+
+                long newId = (long)inserted.id;
+
+                // 4) Copy categories
+                await conn.ExecuteAsync(new CommandDefinition(@"
+INSERT INTO dbo.tbl_article_category_map(article_id, category_id, sort_order)
+SELECT @newId, category_id, sort_order
+FROM dbo.tbl_article_category_map
+WHERE article_id=@oldId;", new { newId, oldId = id }, transaction: tx));
+
+                // 5) Copy tags
+                await conn.ExecuteAsync(new CommandDefinition(@"
+INSERT INTO dbo.tbl_article_tag_map(article_id, tag_id, sort_order)
+SELECT @newId, tag_id, sort_order
+FROM dbo.tbl_article_tag_map
+WHERE article_id=@oldId;", new { newId, oldId = id }, transaction: tx));
+
+                // 6) Copy cards (giữ snapshot y như bài gốc)
+                await conn.ExecuteAsync(new CommandDefinition(@"
+INSERT INTO dbo.tbl_article_product_map
+(article_id, product_id, variant_id, sort_order,
+ product_name_snapshot, product_image_snapshot,
+ variant_name_snapshot, retail_price_snapshot, stock_snapshot)
+SELECT
+ @newId, product_id, variant_id, sort_order,
+ product_name_snapshot, product_image_snapshot,
+ variant_name_snapshot, retail_price_snapshot, stock_snapshot
+FROM dbo.tbl_article_product_map
+WHERE article_id=@oldId;", new { newId, oldId = id }, transaction: tx));
+
+                // 7) Upsert search_text cho bài mới
+                var contentText = ExtractTextFromHtml(contentHtml);
+
+                const string sqlUpsertSearch = @"
+IF OBJECT_ID('dbo.tbl_article_search_text','U') IS NOT NULL
+BEGIN
+  IF EXISTS (SELECT 1 FROM dbo.tbl_article_search_text WHERE article_id=@id)
+    UPDATE dbo.tbl_article_search_text
+      SET title=@title, slug=@slug, excerpt=@excerpt, content_text=@content_text, updated_at_utc=SYSUTCDATETIME()
+      WHERE article_id=@id;
+  ELSE
+    INSERT dbo.tbl_article_search_text(article_id, title, slug, excerpt, content_text, updated_at_utc)
+    VALUES(@id, @title, @slug, @excerpt, @content_text, SYSUTCDATETIME());
+END";
+                await conn.ExecuteAsync(new CommandDefinition(sqlUpsertSearch, new
+                {
+                    id = newId,
+                    title = newTitle,
+                    slug = newSlug,
+                    excerpt = (string?)src.excerpt,
+                    content_text = contentText
+                }, transaction: tx));
+
+                await tx.CommitAsync();
+
+                // (Optional) audit best-effort: log 1 record COPY
+                try
+                {
+                    var cmsUid = await GetCmsUserIdAsync();
+                    int? uidNullable = cmsUid > 0 ? cmsUid : (int?)null;
+
+                    await WriteAuditAsync(
+                        uidNullable,
+                        operation: "COPY",
+                        connectionName: META_CONN_NAME,
+                        schemaName: META_SCHEMA,
+                        tableName: META_TABLE,
+                        pkColumn: "id",
+                        pkValue: newId.ToString(),
+                        oldValuesJson: ToJsonOrNull(new { source_id = id, source_slug = (string?)src.slug }),
+                        newValuesJson: ToJsonOrNull(new { id = newId, title = newTitle, slug = newSlug, status = 0 })
+                    );
+                }
+                catch { /* ignore */ }
+
+                TempData["CmsMessage"] = "Đã copy bài viết (tạo bản nháp mới).";
+                return RedirectToAction("Edit", new { id = newId });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                TempData["CmsError"] = "Copy bài viết lỗi: " + ex.Message;
+                return RedirectToAction("Edit", new { id });
+            }
+        }
+
+        private async Task<string> EnsureUniqueSlugAsync(SqlConnection conn, IDbTransaction tx, string baseSlug, string lang)
+        {
+            baseSlug = Slugify(baseSlug);
+            if (string.IsNullOrWhiteSpace(baseSlug)) baseSlug = "bai-viet";
+
+            var slug = baseSlug;
+            var i = 2;
+
+            while (true)
+            {
+                var exists = await conn.ExecuteScalarAsync<int>(new CommandDefinition(@"
+SELECT CASE WHEN EXISTS(
+  SELECT 1 FROM dbo.tbl_article
+  WHERE is_deleted=0 AND language_code=@lang AND slug=@slug
+) THEN 1 ELSE 0 END;", new { lang, slug }, transaction: tx));
+
+                if (exists == 0) return slug;
+
+                slug = $"{baseSlug}-{i}";
+                i++;
+                if (i > 5000) return $"{baseSlug}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            }
+        }
+
+
     }
+
+
 }

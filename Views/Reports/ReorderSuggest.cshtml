@@ -1,0 +1,540 @@
+﻿@model CmsTools.Models.ReorderSuggestViewModel
+@using System
+@using System.Collections.Generic
+@using System.Globalization
+@using System.Linq
+
+@{
+    ViewData["Title"] = "Gợi ý nhập hàng";
+
+    var hasRows = Model.Rows != null && Model.Rows.Any();
+    var rows = Model.Rows ?? new List<CmsTools.Models.ReorderSuggestRow>();
+
+    int totalVariants = rows.Count;
+    int criticalCount = rows.Count(r => string.Equals(r.RiskLevel, "CRITICAL", StringComparison.OrdinalIgnoreCase));
+    int warningCount = rows.Count(r => string.Equals(r.RiskLevel, "WARNING", StringComparison.OrdinalIgnoreCase));
+    int okCount = rows.Count(r => string.Equals(r.RiskLevel, "OK", StringComparison.OrdinalIgnoreCase));
+    int noSalesCount = rows.Count(r => string.Equals(r.RiskLevel, "NO_SALES", StringComparison.OrdinalIgnoreCase));
+
+    long totalSuggestQty = rows.Sum(r => (long)r.SuggestQty);
+
+    decimal estImportCost = rows.Sum(r => r.SuggestQty * r.CostPrice);
+    decimal estRetailValue = rows.Sum(r => r.SuggestQty * r.RetailPrice);
+
+    var rangeDays = (Model.ToDate.Date - Model.FromDate.Date).Days + 1;
+    if (rangeDays < 1) rangeDays = 1;
+
+    string RiskBadgeClass(string risk) =>
+        (risk ?? "").ToUpperInvariant() switch
+        {
+            "CRITICAL" => "bg-danger",
+            "WARNING" => "bg-warning text-dark",
+            "OK" => "bg-success",
+            "NO_SALES" => "bg-secondary",
+            _ => "bg-light text-dark border"
+        };
+
+    string RiskLabel(string risk) =>
+        (risk ?? "").ToUpperInvariant() switch
+        {
+            "CRITICAL" => "Nguy cấp",
+            "WARNING" => "Cảnh báo",
+            "OK" => "Ổn",
+            "NO_SALES" => "Không bán",
+            _ => "Khác"
+        };
+}
+
+<div class="cmstools-page-header mb-3">
+    <div>
+        <h2 class="cmstools-page-title">Gợi ý nhập hàng</h2>
+
+        <div class="cmstools-page-subtitle">
+            <span>
+                Kỳ phân tích:
+                <strong>@Model.FromDate.ToString("dd/MM/yyyy") – @Model.ToDate.ToString("dd/MM/yyyy")</strong>
+                <span class="ms-2 text-muted small">(@rangeDays ngày)</span>
+            </span>
+
+            <span class="ms-3 small text-muted">
+                Gợi ý dựa trên mức bán trung bình trong kỳ.
+                <strong>Tồn mục tiêu</strong> = <strong>TB bán/ngày</strong> × <strong>Số ngày dự báo</strong> × <strong>Hệ số an toàn</strong>.
+            </span>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3 report-filter-card">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 cmstools-filter-row">
+
+            <div class="col-12 col-md-3">
+                <label class="form-label small mb-1">Từ ngày</label>
+                <div class="cmstools-date-wrapper">
+                    <input type="text"
+                           class="form-control form-control-sm js-date-display"
+                           data-target-name="fromDate"
+                           value="@Model.FromDate.ToString("dd/MM/yyyy")"
+                           placeholder="dd/MM/yyyy"
+                           autocomplete="off" />
+                    <input type="hidden" name="fromDate" value="@Model.FromDate.ToString("yyyy-MM-dd")" />
+                </div>
+            </div>
+
+            <div class="col-12 col-md-3">
+                <label class="form-label small mb-1">Đến ngày</label>
+                <div class="cmstools-date-wrapper">
+                    <input type="text"
+                           class="form-control form-control-sm js-date-display"
+                           data-target-name="toDate"
+                           value="@Model.ToDate.ToString("dd/MM/yyyy")"
+                           placeholder="dd/MM/yyyy"
+                           autocomplete="off" />
+                    <input type="hidden" name="toDate" value="@Model.ToDate.ToString("yyyy-MM-dd")" />
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">
+                    Số ngày dự báo
+                    <i class="bi bi-info-circle ms-1 text-muted"
+                       data-bs-toggle="popover"
+                       data-bs-trigger="hover focus"
+                       data-bs-placement="top"
+                       data-bs-content="Số ngày bạn muốn dự kiến mức bán trong tương lai (ví dụ 14 ngày)."></i>
+                </label>
+                <input type="number" min="1" class="form-control form-control-sm"
+                       name="horizonDays" value="@Model.HorizonDays" />
+            </div>
+
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">
+                    Hệ số an toàn
+                    <i class="bi bi-info-circle ms-1 text-muted"
+                       data-bs-toggle="popover"
+                       data-bs-trigger="hover focus"
+                       data-bs-placement="top"
+                       data-bs-content="VD 1.2 = dự phòng thêm 20% so với mức bán dự kiến."></i>
+                </label>
+                <input type="number" step="0.01" min="1" class="form-control form-control-sm"
+                       name="safetyFactor"
+                       value="@Model.SafetyFactor.ToString("0.##", CultureInfo.InvariantCulture)" />
+                <div class="form-text small">VD 1.2 = dự phòng thêm 20%</div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-1">
+                    Top N
+                    <i class="bi bi-info-circle ms-1 text-muted"
+                       data-bs-toggle="popover"
+                       data-bs-trigger="hover focus"
+                       data-bs-placement="top"
+                       data-bs-content="Giới hạn số SKU hiển thị để dễ xem."></i>
+                </label>
+                <input type="number" min="1" class="form-control form-control-sm"
+                       name="topN" value="@Model.TopN" />
+                <div class="form-text small">Giới hạn số SKU hiển thị</div>
+            </div>
+
+            <div class="col-12 col-md-6 d-flex align-items-end">
+                <div class="form-check me-3">
+                    <input class="form-check-input" type="checkbox" id="onlyActive" name="onlyActive" value="true"
+                           @(Model.OnlyActive ? "checked" : "") />
+                    <label class="form-check-label small" for="onlyActive">
+                        Chỉ sản phẩm/variant đang bán
+                    </label>
+                </div>
+
+                <div class="form-check me-3">
+                    <input class="form-check-input" type="checkbox" id="includeZeroSales" name="includeZeroSales" value="true"
+                           @(Model.IncludeZeroSales ? "checked" : "") />
+                    <label class="form-check-label small" for="includeZeroSales">
+                        Gồm cả sản phẩm không bán trong kỳ
+                    </label>
+                </div>
+
+                <div class="ms-md-auto text-md-end">
+                    <div class="btn-group btn-group-sm mb-2 report-range-chips">
+                        <button type="button" class="btn btn-outline-secondary" data-range="last30">30 ngày gần nhất</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="last60">60 ngày gần nhất</button>
+                        <button type="button" class="btn btn-outline-secondary" data-range="thisMonth">Tháng này</button>
+                    </div>
+                    <div>
+                        <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
+                        <a class="btn btn-outline-secondary btn-sm"
+                           href="@Url.Action("ReorderSuggest", "Reports")">Reset</a>
+                    </div>
+                </div>
+            </div>
+
+        </form>
+    </div>
+</div>
+
+@* KPI *@
+<div class="row g-3 mb-3 report-kpi-row">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm report-kpi-card report-kpi-main">
+            <div class="card-body py-2">
+                <div class="report-kpi-label">Số SKU phân tích</div>
+                <div class="fw-bold fs-5 report-kpi-value">@totalVariants</div>
+                <div class="small text-muted">Top N = @Model.TopN</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm report-kpi-card">
+            <div class="card-body py-2">
+                <div class="report-kpi-label">Tổng SL cần nhập</div>
+                <div class="fw-bold fs-6 report-kpi-value">
+                    @totalSuggestQty.ToString("N0", CultureInfo.CurrentCulture)
+                </div>
+                <div class="small text-muted">Tổng “Cần nhập” của các SKU</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm report-kpi-card">
+            <div class="card-body py-2">
+                <div class="report-kpi-label">Ước tính vốn nhập</div>
+                <div class="fw-bold fs-6 text-danger report-kpi-value">
+                    @estImportCost.ToString("N0", CultureInfo.CurrentCulture) đ
+                </div>
+                <div class="small text-muted">Cần nhập × Giá vốn</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm report-kpi-card">
+            <div class="card-body py-2">
+                <div class="report-kpi-label">Giá trị bán lẻ tiềm năng</div>
+                <div class="fw-bold fs-6 text-success report-kpi-value">
+                    @estRetailValue.ToString("N0", CultureInfo.CurrentCulture) đ
+                </div>
+                <div class="small text-muted">Cần nhập × Giá bán lẻ</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+                <span class="badge bg-danger">Nguy cấp: @criticalCount</span>
+                <span class="badge bg-warning text-dark">Cảnh báo: @warningCount</span>
+                <span class="badge bg-success">Ổn: @okCount</span>
+                <span class="badge bg-secondary">Không bán: @noSalesCount</span>
+                <span class="ms-auto small text-muted">
+                    Tip: Ưu tiên “Nguy cấp/Cảnh báo” + “Cần nhập” cao để lên PO trước.
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-light border small mb-2">
+    <strong>Risk</strong>:
+    Nguy cấp (&lt; 7 ngày đủ hàng),
+    Cảnh báo (&lt; 14),
+    Ổn (≥ 14),
+    Không bán (TB bán/ngày = 0).
+</div>
+
+@if (!hasRows)
+{
+    <p class="text-muted">Không có dữ liệu trong khoảng lọc.</p>
+}
+else
+{
+    <div class="cmstools-table-container mb-3">
+        <div class="cmstools-table-scroll">
+            <table class="table table-striped table-sm table-bordered cmstools-table mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:140px;">Mở</th>
+
+                        <th style="min-width:120px;">
+                            Risk
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="Dựa trên số ngày đủ hàng: Nguy cấp < 7, Cảnh báo < 14, Ổn ≥ 14, Không bán nếu TB bán/ngày = 0."></i>
+                        </th>
+
+                        <th style="min-width:140px;">SKU</th>
+                        <th style="min-width:220px;">Sản phẩm</th>
+                        <th style="min-width:200px;">Variant</th>
+
+                        <th class="text-end" title="Tồn kho hiện tại">Tồn</th>
+                        <th class="text-end" title="Tổng số lượng bán trong kỳ phân tích">Bán (SL)</th>
+                        <th class="text-end" title="Số đơn có phát sinh bán trong kỳ">Đơn</th>
+
+                        <th class="text-end">
+                            TB bán/ngày
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="TB bán/ngày = Tổng SL bán / Số ngày trong kỳ."></i>
+                        </th>
+
+                        <th class="text-end">
+                            Đủ hàng (ngày)
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="Đủ hàng (ngày) = Tồn hiện tại / TB bán/ngày. Nếu TB=0 thì không tính được."></i>
+                        </th>
+
+                        <th class="text-end">
+                            Dự kiến bán
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="Dự kiến bán = TB bán/ngày × Số ngày dự báo × Hệ số an toàn."></i>
+                        </th>
+
+                        <th class="text-end">
+                            Tồn mục tiêu
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="Tồn mục tiêu: mức tồn bạn muốn có để đủ bán cho kỳ dự báo (đã gồm dự phòng)."></i>
+                        </th>
+
+                        <th class="text-end">
+                            Cần nhập
+                            <i class="bi bi-info-circle ms-1 text-muted"
+                               data-bs-toggle="popover"
+                               data-bs-trigger="hover focus"
+                               data-bs-placement="top"
+                               data-bs-content="Cần nhập = max(ceil(Tồn mục tiêu − Tồn hiện tại), 0)."></i>
+                        </th>
+
+                        <th class="text-end" title="Giá vốn (ước tính)">Giá vốn</th>
+                        <th class="text-end" title="Giá bán lẻ (ước tính)">Giá bán</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var r in rows)
+                    {
+                        var risk = (r.RiskLevel ?? "").ToUpperInvariant();
+                        var badgeCls = RiskBadgeClass(risk);
+
+                        var productDetailUrl = Url.Action("Detail", "Products", new { id = r.ProductId });
+                        var editVariantUrl = Url.Action("EditVariant", "Products", new { productId = r.ProductId, id = r.VariantId });
+
+                        <tr class="@(risk == "CRITICAL" ? "table-danger" : risk == "WARNING" ? "table-warning" : "")">
+
+                            <td class="text-nowrap">
+                                <a class="btn btn-sm btn-outline-primary"
+                                   href="@productDetailUrl"
+                                   target="_blank" rel="noopener">
+                                    Product
+                                </a>
+                                <a class="btn btn-sm btn-outline-secondary ms-1"
+                                   href="@editVariantUrl"
+                                   target="_blank" rel="noopener">
+                                    Variant
+                                </a>
+                            </td>
+
+                            <td>
+                                <span class="badge @badgeCls">@RiskLabel(risk)</span>
+                                <div class="small text-muted">@risk</div>
+                            </td>
+
+                            <td class="fw-semibold">
+                                <a class="text-decoration-none"
+                                   href="@productDetailUrl"
+                                   target="_blank" rel="noopener">
+                                    @r.Sku
+                                </a>
+                            </td>
+
+                            <td>
+                                <div class="fw-semibold">
+                                    <a class="text-decoration-none"
+                                       href="@productDetailUrl"
+                                       target="_blank" rel="noopener">
+                                        @r.ProductName
+                                    </a>
+                                </div>
+                                <div class="small text-muted">#@r.ProductId</div>
+                            </td>
+
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(r.VariantName))
+                                {
+                                    <div>
+                                        <a class="text-decoration-none"
+                                           href="@editVariantUrl"
+                                           target="_blank" rel="noopener">
+                                            @r.VariantName
+                                        </a>
+                                    </div>
+                                }
+                                <div class="small text-muted">VariantId: @r.VariantId</div>
+                            </td>
+
+                            <td class="text-end">@r.Stock.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td class="text-end">@r.SoldQty.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td class="text-end">@r.OrderCount.ToString("N0", CultureInfo.CurrentCulture)</td>
+
+                            <td class="text-end">
+                                @r.AvgQtyPerDay.ToString("0.####", CultureInfo.CurrentCulture)
+                            </td>
+
+                            <td class="text-end">
+                                @if (r.DaysCover.HasValue)
+                                {
+                                    @r.DaysCover.Value.ToString("0.#", CultureInfo.CurrentCulture)
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+
+                            <td class="text-end">@r.ForecastQty.ToString("0.##", CultureInfo.CurrentCulture)</td>
+                            <td class="text-end">@r.TargetStock.ToString("0.##", CultureInfo.CurrentCulture)</td>
+
+                            <td class="text-end fw-bold">
+                                @r.SuggestQty.ToString("N0", CultureInfo.CurrentCulture)
+                            </td>
+
+                            <td class="text-end">@r.CostPrice.ToString("N0", CultureInfo.CurrentCulture)</td>
+                            <td class="text-end">@r.RetailPrice.ToString("N0", CultureInfo.CurrentCulture)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="small text-muted">
+        Công thức: <strong>Cần nhập</strong> = max(ceil(<strong>Tồn mục tiêu</strong> − <strong>Tồn hiện tại</strong>), 0).
+        Risk dựa trên <strong>Đủ hàng (ngày)</strong>. Nếu TB bán/ngày = 0 → <strong>Không bán</strong>.
+    </div>
+}
+
+@section Scripts {
+    <script>
+        (function () {
+            "use strict";
+
+            // ===== Bootstrap popover init =====
+            document.addEventListener("DOMContentLoaded", function () {
+                var els = document.querySelectorAll('[data-bs-toggle="popover"]');
+                els.forEach(function (el) {
+                    try { new bootstrap.Popover(el); } catch (e) { }
+                });
+            });
+
+            function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+            function formatDisplayDate(d) { // dd/MM/yyyy
+                return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear();
+            }
+
+            function formatHiddenDate(d) { // yyyy-MM-dd
+                return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+            }
+
+            function parseDisplayDate(str) {
+                if (!str) return null;
+                var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(str.trim());
+                if (!m) return null;
+                var dd = parseInt(m[1], 10);
+                var MM = parseInt(m[2], 10);
+                var yyyy = parseInt(m[3], 10);
+                if (MM < 1 || MM > 12 || dd < 1 || dd > 31) return null;
+                var d = new Date(yyyy, MM - 1, dd);
+                if (d.getFullYear() !== yyyy || d.getMonth() !== MM - 1 || d.getDate() !== dd) return null;
+                return d;
+            }
+
+            function syncDisplayToHidden(input) {
+                var wrapper = input.closest(".cmstools-date-wrapper");
+                if (!wrapper) return;
+                var targetName = input.getAttribute("data-target-name");
+                if (!targetName) return;
+                var hidden = wrapper.querySelector('input[type="hidden"][name="' + targetName + '"]');
+                if (!hidden) return;
+
+                var dt = parseDisplayDate(input.value);
+                if (!dt) {
+                    hidden.value = "";
+                    input.classList.add("is-invalid");
+                } else {
+                    hidden.value = formatHiddenDate(dt);
+                    input.value = formatDisplayDate(dt);
+                    input.classList.remove("is-invalid");
+                }
+            }
+
+            document.addEventListener("blur", function (e) {
+                var input = e.target;
+                if (input.classList && input.classList.contains("js-date-display")) {
+                    syncDisplayToHidden(input);
+                }
+            }, true);
+
+            function setRange(range) {
+                var form = document.querySelector(".cmstools-filter-row");
+                if (!form) return;
+                form = form.closest("form");
+                if (!form) return;
+
+                var fromDisplay = form.querySelector('.js-date-display[data-target-name="fromDate"]');
+                var toDisplay = form.querySelector('.js-date-display[data-target-name="toDate"]');
+                var fromHidden = form.querySelector('input[type="hidden"][name="fromDate"]');
+                var toHidden = form.querySelector('input[type="hidden"][name="toDate"]');
+
+                if (!fromDisplay || !toDisplay || !fromHidden || !toHidden) return;
+
+                var today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                var from, to;
+                if (range === "last30") {
+                    to = new Date(today);
+                    from = new Date(today);
+                    from.setDate(from.getDate() - 29);
+                } else if (range === "last60") {
+                    to = new Date(today);
+                    from = new Date(today);
+                    from.setDate(from.getDate() - 59);
+                } else if (range === "thisMonth") {
+                    to = new Date(today);
+                    from = new Date(today.getFullYear(), today.getMonth(), 1);
+                } else {
+                    return;
+                }
+
+                fromDisplay.value = formatDisplayDate(from);
+                toDisplay.value = formatDisplayDate(to);
+                fromHidden.value = formatHiddenDate(from);
+                toHidden.value = formatHiddenDate(to);
+
+                form.submit();
+            }
+
+            document.addEventListener("click", function (e) {
+                var btn = e.target.closest("[data-range]");
+                if (!btn) return;
+                var range = btn.getAttribute("data-range");
+                if (!range) return;
+                e.preventDefault();
+                setRange(range);
+            });
+        })();
+    </script>
+}

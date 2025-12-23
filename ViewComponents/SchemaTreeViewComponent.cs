@@ -135,5 +135,32 @@ ORDER BY t.connection_id, t.schema_name, t.table_name;";
 
             return View(vm); // Views/Shared/Components/SchemaTree/Default.cshtml
         }
+        private static string PrettyTableName(string? displayName, string? tableName)
+        {
+            if (!string.IsNullOrWhiteSpace(displayName))
+                return displayName.Trim();
+
+            var n = (tableName ?? "").Trim();
+
+            // bỏ prefix hay gặp
+            foreach (var p in new[] { "tbl_", "tb_", "t_", "vw_", "view_", "v_" })
+                if (n.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                    n = n.Substring(p.Length);
+
+            // snake_case -> Title Case
+            var parts = n.Split(new[] { '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return tableName ?? "";
+
+            return string.Join(" ", parts.Select(w => char.ToUpperInvariant(w[0]) + w.Substring(1)));
+        }
+
+        private static string PrettySchema(string? schema)
+        {
+            schema = (schema ?? "").Trim();
+            if (schema.Equals("dbo", StringComparison.OrdinalIgnoreCase)) return "Data"; // hoặc "Core"
+            return schema;
+        }
+
     }
+
 }

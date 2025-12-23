@@ -221,6 +221,17 @@
                 
 
                 <div class="d-grid gap-2">
+                    @if (Model.Id > 0 && perm.CanCreate)
+                    {
+                        <button type="submit"
+                                class="btn btn-outline-secondary"
+                                data-action="Copy"
+                                formaction="@Url.Action("Copy", "Articles", new { id = Model.Id })"
+                                formmethod="post"
+                                onclick="return confirm('Copy bài viết này thành 1 bản nháp mới?');">
+                            Copy bài viết
+                        </button>
+                    }
                     @if (perm.CanCreate || perm.CanUpdate)
                     {
                         <button class="btn btn-primary" type="submit" data-action="SaveDraft">Lưu nháp</button>
@@ -243,6 +254,12 @@
                         <button class="btn btn-warning" type="submit" data-action="Schedule">Hẹn giờ đăng</button>
                     }
 
+                    @if (perm.CanSchedule && Model.Status == 2)
+                    {
+                        <button class="btn btn-outline-warning" type="submit" data-action="CancelSchedule">
+                            Huỷ hẹn (về nháp)
+                        </button>
+                    }
 
 
                     @if (perm.CanArchive)
@@ -712,7 +729,7 @@
                 fd.append('category_ids_csv', (document.getElementById('category_ids_csv')?.value || ''));
                 fd.append('tag_ids_csv', (document.getElementById('tag_ids_csv')?.value || ''));
                 fd.append('cards_json', buildCardsJson());
-                fd.append('scheduled_at_vn', (document.getElementById('schedule_vn')?.value || ''));
+               
                 fd.append('concurrency_token', (document.getElementById('concurrency_token')?.value || ''));
 
                 const resp = await fetch(AUTOSAVE_URL, {
@@ -1351,29 +1368,43 @@
           return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
         }
 
-                                  function onBeforeSubmit(e) {
-          // chặn khi autosave đang chạy
-          if (_autosaveInFlight) {
-            alert('Đang autosave... vui lòng thử lại sau vài giây.');
-            return false;
-          }
+                                              function onBeforeSubmit(e) {
+        if (_autosaveInFlight) {
+          alert('Đang autosave... vui lòng thử lại sau vài giây.');
+          return false;
+        }
 
-          // lấy nút submit thật sự
-          const submitter = e?.submitter || document.activeElement;
-          const action = submitter?.dataset?.action || '';
-          const actionHidden = document.getElementById('action_hidden');
-          if (actionHidden) actionHidden.value = action;
+        // lấy button submit đúng nhất
+        const raw = e?.submitter || document.activeElement;
+        const btn = raw?.closest ? raw.closest('button[type="submit"]') : raw;
+        const action = btn?.dataset?.action || '';
+
+        const actionHidden = document.getElementById('action_hidden');
+        if (actionHidden) actionHidden.value = action;
+
+        if (!action) {
+          alert('Không xác định được action (nút bấm). Thử bấm lại.');
+          return false;
+        }
 
           // permission gate client-side
           if (action === 'Publish' && !PERM.canPublish) { alert('Bạn không có quyền Đăng.'); return false; }
           if (action === 'Schedule' && !PERM.canSchedule) { alert('Bạn không có quyền Hẹn giờ đăng.'); return false; }
+          if (action === 'CancelSchedule' && !PERM.canSchedule) { alert('Bạn không có quyền Huỷ hẹn.'); return false; }
           if (action === 'Archive' && !PERM.canArchive) { alert('Bạn không có quyền Lưu trữ.'); return false; }
           if (action === 'SaveDraft' && !(PERM.canCreate || PERM.canUpdate)) { alert('Bạn không có quyền Lưu nháp.'); return false; }
 
-          // đọc schedule (chỉ có 1 input schedule_vn là đúng)
+          // đọc schedule input
           const schEl = document.getElementById('schedule_vn');
           const scheduleVal = (schEl?.value || '').trim();
 
+          // set hidden scheduled_at_vn
+          const scheduledHidden = document.getElementById('scheduled_at_vn');
+          if (scheduledHidden) {
+            scheduledHidden.value = (action === 'CancelSchedule') ? '' : scheduleVal;
+          }
+
+          // validate khi bấm Schedule
           if (action === 'Schedule') {
             if (!scheduleVal) {
               alert('Bạn chọn "Hẹn giờ đăng" thì phải nhập Schedule (giờ VN).');
@@ -1394,9 +1425,6 @@
           }
 
           // set hidden fields để server nhận đủ dữ liệu
-          const scheduledHidden = document.getElementById('scheduled_at_vn');
-          if (scheduledHidden) scheduledHidden.value = scheduleVal;
-
           const contentHidden = document.getElementById('content_html');
           if (contentHidden) contentHidden.value = getEditorHtml();
 
@@ -1414,6 +1442,7 @@
           setDirty(false);
           return true;
         }
+
 
 
     </script>

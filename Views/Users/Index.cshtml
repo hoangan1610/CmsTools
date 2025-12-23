@@ -63,7 +63,8 @@ else
                                 var parts = u.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries);
                                 foreach (var r in parts)
                                 {
-                                    <span class="badge bg-secondary me-1">@r.Trim()</span>
+                                    <span class="badge role-badge me-1">@r.Trim()</span>
+
                                 }
                             }
                             else
@@ -72,37 +73,50 @@ else
                             }
                         </td>
 
-                        <td>
-                            <a class="btn btn-sm btn-outline-primary me-1"
-                               href="@Url.Action("Edit", "Users", new { id = u.Id })">
-                                Sửa
-                            </a>
+                        <td class="text-nowrap">
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-light border btn-action dropdown-toggle"
+                                        type="button"
+                                        data-bs-toggle="dropdown"
+                                        aria-expanded="false"
+                                        title="Thao tác">
+                                    <i class="bi bi-three-dots-vertical"></i>
+                                </button>
 
-                            <a class="btn btn-sm btn-outline-warning me-1"
-                               href="@Url.Action("ChangePassword", "Users", new { id = u.Id })">
-                                Đổi mật khẩu
-                            </a>
-
-                            <form method="post"
-                                  asp-controller="Users"
-                                  asp-action="ToggleActive"
-                                  asp-route-id="@u.Id"
-                                  class="d-inline">
-                                @Html.AntiForgeryToken()
-                                @if (u.IsActive)
-                                {
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        Khoá
-                                    </button>
-                                }
-                                else
-                                {
-                                    <button type="submit" class="btn btn-sm btn-outline-success">
-                                        Mở khoá
-                                    </button>
-                                }
-                            </form>
+                                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                                    <li>
+                                        <a class="dropdown-item" href="@Url.Action("Edit", "Users", new { id = u.Id })">
+                                            <i class="bi bi-pencil-square me-2"></i>Sửa
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="@Url.Action("ChangePassword", "Users", new { id = u.Id })">
+                                            <i class="bi bi-key me-2"></i>Đổi mật khẩu
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li>
+                                        <form method="post" asp-controller="Users" asp-action="ToggleActive" asp-route-id="@u.Id" class="px-2">
+                                            @Html.AntiForgeryToken()
+                                            @if (u.IsActive)
+                                            {
+                                                <button type="submit" class="dropdown-item text-danger btn-linklike">
+                                                    <i class="bi bi-lock-fill me-2"></i>Khoá user
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="submit" class="dropdown-item text-success btn-linklike">
+                                                    <i class="bi bi-unlock-fill me-2"></i>Mở khoá user
+                                                </button>
+                                            }
+                                        </form>
+                                    </li>
+                                </ul>
+                            </div>
                         </td>
+
+
 
                     </tr>
                 }
@@ -110,3 +124,70 @@ else
         </table>
     </div>
 }
+<style>
+    .table-responsive {
+        overflow-x: auto;
+        overflow-y: visible;
+    }
+
+    .btn-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 30px;
+        border-radius: 10px;
+    }
+
+        .btn-action.dropdown-toggle::after {
+            display: none !important;
+        }
+
+    .dropdown-menu {
+        z-index: 2000;
+        border-radius: 12px;
+        padding: .35rem;
+    }
+
+    .dropdown-item {
+        border-radius: 10px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+    }
+
+    .btn-linklike {
+        background: transparent;
+        border: 0;
+        width: 100%;
+        text-align: left;
+        padding: .25rem .75rem;
+    }
+
+    .role-badge {
+        background: #f1f5f9;
+        color: #0f172a;
+        border: 1px solid #e2e8f0;
+        font-weight: 600;
+    }
+
+    @@media (max-width:576px) {
+        td.text-nowrap {
+            white-space: normal !important;
+        }
+    }
+</style>
+
+@section Scripts {
+    <script>
+        // đảm bảo dropdown trong table-responsive không bị "kẹt"
+        document.querySelectorAll('button[data-bs-toggle="dropdown"]').forEach(btn => {
+          bootstrap.Dropdown.getOrCreateInstance(btn, {
+            popperConfig: { strategy: 'fixed' }
+          });
+        });
+    </script>
+}
+
+

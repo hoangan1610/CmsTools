@@ -1,157 +1,69 @@
 ﻿@model CmsTools.Models.DataListViewModel
 @using System.Globalization
+@using Microsoft.AspNetCore.Html
+@using Microsoft.AspNetCore.Mvc.Rendering
 
-@section Scripts {
-    <script>
-        // ===== Mở modal theo data-cms-modal =====
-        document.addEventListener('click', function (e) {
-            const btn = e.target.closest('[data-cms-modal]');
-            if (!btn) return;
+@{
+    var title = Model.Table.DisplayName ?? Model.Table.TableName;
+    ViewData["Title"] = title;
 
-            e.preventDefault();
+    var idCol = Model.Columns
+        .FirstOrDefault(c => c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase));
 
-            const url = btn.getAttribute('data-url');
-            if (!url) return;
+    var otherCols = Model.Columns
+        .Where(c => !c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
-            const modalEl = document.getElementById('cmsRowModal');
-            const modalBody = document.getElementById('cmsRowModalBody');
-            const modalTitleEl = document.getElementById('cmsRowModalTitle');
+    // Bảng đánh giá?
+    var isReviewTable = string.Equals(
+        Model.Table.TableName,
+        "tbl_product_review",
+        StringComparison.OrdinalIgnoreCase);
 
-            if (!modalEl || !modalBody) return;
-
-            const title = btn.getAttribute('data-title');
-            if (modalTitleEl && title) {
-                modalTitleEl.textContent = title;
+    // Đếm số review CHỜ DUYỆT (status = 0) trên TRANG HIỆN TẠI
+    var pendingCount = 0;
+    if (isReviewTable && Model.Rows != null)
+    {
+        foreach (System.Collections.Generic.IDictionary<string, object?> r in Model.Rows)
+        {
+            if (r != null && r.ContainsKey("status"))
+            {
+                if (byte.TryParse(r["status"]?.ToString(), out var st) && st == 0)
+                {
+                    pendingCount++;
+                }
             }
+        }
+    }
 
-            modalBody.innerHTML =
-                '<div class="text-center text-muted small p-3">Đang tải...</div>';
-
-            fetch(url, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-                .then(r => r.text())
-                .then(html => {
-                    modalBody.innerHTML = html;
-                })
-                .catch(err => {
-                    console.error(err);
-                    modalBody.innerHTML =
-                        '<div class="text-danger p-3">Lỗi tải dữ liệu.</div>';
-                });
-
-            const bsModal = new bootstrap.Modal(modalEl);
-            bsModal.show();
-        });
-
-        // ===== AJAX submit cho form trong modal =====
-        document.addEventListener('submit', function (e) {
-            const form = e.target;
-            if (!form.matches('form[data-cms-ajax="true"], form[data_cms_ajax="true"]')) return;
-
-            // Cho browser chạy HTML5 validation
-            if (!form.checkValidity()) {
-                // Không preventDefault để browser highlight lỗi
-                return;
-            }
-
-            e.preventDefault();
-
-            const modalBody = document.getElementById('cmsRowModalBody');
-            if (modalBody) {
-                modalBody.classList.remove('cmstools-modal-error');
-            }
-
-            const action = form.getAttribute('action') || window.location.href;
-            const method = (form.getAttribute('method') || 'post').toUpperCase();
-
-            // Tạo FormData từ form
-            const fd = new FormData(form);
-
-            // Gắn thêm nút submit đã bấm (newStatus, v.v.)
-            const submitter = e.submitter;   // Chrome, Edge, Firefox mới đều hỗ trợ
-            if (submitter && submitter.name) {
-                fd.append(submitter.name, submitter.value);
-            }
-
-            fetch(action, {
-                method: method,
-                body: fd,
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-                .then(async res => {
-                    const ct = (res.headers.get('content-type') || '').toLowerCase();
-
-                    if (ct.includes('application/json')) {
-                        const data = await res.json().catch(() => null);
-
-                        if (data && data.ok) {
-                            if (data.message) {
-                                alert(data.message);
-                            }
-                            window.location.reload();
-                            return;
-                        }
-
-                        if (data && data.message) {
-                            alert(data.message);
-                        } else {
-                            alert('Có lỗi khi cập nhật, nhưng server không trả message.');
-                        }
-                        return;
-                    }
-
-                    const html = await res.text();
-                    if (modalBody) {
-                        modalBody.innerHTML = html;
-                        modalBody.classList.add('cmstools-modal-error');
-                    }
-                })
-                .catch(err => {
-                    console.error(err);
-                    if (modalBody) {
-                        modalBody.innerHTML =
-                            '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
-                        modalBody.classList.add('cmstools-modal-error');
-                    }
-                });
-        });
-
-
-                // Đồng bộ checkbox "Chỉ hiện đánh giá chưa duyệt" với dropdown status
-        document.addEventListener('change', function (e) {
-            const cb = e.target.closest('#filterOnlyPending');
-            if (!cb) return;
-
-            const form = cb.closest('form');
-            if (!form) return;
-
-            const statusSelect = form.querySelector('select[name="status"]');
-            if (!statusSelect) return;
-
-            if (cb.checked) {
-                // Chỉ hiện CHỜ DUYỆT
-                statusSelect.value = '0';
-            } else {
-                // Trả về "-- Tất cả --"
-                statusSelect.value = '';
-            }
-        });
-
-    </script>
+    // Lấy filter status hiện tại để sync với checkbox "Chỉ hiện đánh giá chưa duyệt"
+    var statusFilterValue = "";
+    if (Model.Filters != null && Model.Filters.TryGetValue("status", out var stFilterObj))
+    {
+        statusFilterValue = stFilterObj?.ToString() ?? "";
+    }
+    var onlyPendingChecked = isReviewTable && statusFilterValue == "0";
 }
 
-
-
-
-
 @functions {
+    // Render option KHÔNG dính selected="@( ... )" để né RZ1031
+    IHtmlContent Opt(string value, string text, string current)
+    {
+        var opt = new TagBuilder("option");
+        opt.Attributes["value"] = value;
+
+        if (string.Equals(value ?? "", current ?? "", StringComparison.OrdinalIgnoreCase))
+            opt.Attributes["selected"] = "selected";
+
+        opt.InnerHtml.Append(text);
+        return opt;
+    }
+
     bool IsImageColumn(CmsTools.Models.CmsColumnMeta col)
     {
         var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
         var fmt = (col.Format ?? string.Empty).ToLowerInvariant();
 
-        // Ưu tiên format
         if (fmt == "img" || fmt == "image" || fmt.StartsWith("img:"))
             return true;
 
@@ -190,8 +102,7 @@
         var local = s.Substring(0, atIndex);
         var domain = s.Substring(atIndex);
 
-        if (local.Length <= 1)
-            return s;
+        if (local.Length <= 1) return s;
 
         var firstChar = local[0];
         return firstChar + new string('*', Math.Max(3, local.Length - 1)) + domain;
@@ -209,19 +120,14 @@
 
         var lower = fmt.ToLowerInvariant();
 
-        // ===== MASK PHONE / EMAIL =====
         if (lower.StartsWith("mask:"))
         {
-            if (lower == "mask:phone")
-                return MaskPhone(s);
-
-            if (lower == "mask:email")
-                return MaskEmail(s);
-
+            if (lower == "mask:phone") return MaskPhone(s);
+            if (lower == "mask:email") return MaskEmail(s);
             return s;
         }
 
-        // 🔹 Format riêng cho status của review
+        // Format riêng cho status review (khi dùng ở cell bình thường)
         if (lower == "reviewstatus")
         {
             if (byte.TryParse(s, out var b))
@@ -237,25 +143,20 @@
             return s;
         }
 
-
         try
         {
             if (value is DateTime dt)
             {
                 if (lower == "datetime")
                     return dt.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture);
-
                 if (lower == "date")
                     return dt.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture);
-
                 if (lower == "time")
                     return dt.ToString("HH:mm", CultureInfo.CurrentCulture);
             }
 
             if (value is IFormattable f)
-            {
                 return f.ToString(fmt, CultureInfo.CurrentCulture) ?? s;
-            }
 
             return s;
         }
@@ -268,54 +169,10 @@
     string BuildThStyle(CmsTools.Models.CmsColumnMeta c)
     {
         if (c.Width.HasValue && c.Width.Value > 0)
-        {
             return $"min-width:{c.Width.Value}px;max-width:{c.Width.Value + 60}px;";
-        }
         return string.Empty;
     }
 }
-
-@{
-    var title = Model.Table.DisplayName ?? Model.Table.TableName;
-    ViewData["Title"] = title;
-
-    var idCol = Model.Columns
-        .FirstOrDefault(c => c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase));
-    var otherCols = Model.Columns
-        .Where(c => !c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase))
-        .ToList();
-
-    // Bảng đánh giá?
-    var isReviewTable = string.Equals(
-        Model.Table.TableName,
-        "tbl_product_review",
-        StringComparison.OrdinalIgnoreCase);
-
-    // Đếm số review CHỜ DUYỆT (status = 0) trên TRANG HIỆN TẠI
-    var pendingCount = 0;
-    if (isReviewTable && Model.Rows != null)
-    {
-        foreach (System.Collections.Generic.IDictionary<string, object?> r in Model.Rows)
-        {
-            if (r != null && r.ContainsKey("status"))
-            {
-                if (byte.TryParse(r["status"]?.ToString(), out var st) && st == 0)
-                {
-                    pendingCount++;
-                }
-            }
-        }
-    }
-
-    // Lấy filter status hiện tại để sync với checkbox "Chỉ hiện đánh giá chưa duyệt"
-    var statusFilterValue = "";
-    if (Model.Filters != null && Model.Filters.TryGetValue("status", out var stFilterObj))
-    {
-        statusFilterValue = stFilterObj?.ToString() ?? "";
-    }
-    var onlyPendingChecked = isReviewTable && statusFilterValue == "0";
-}
-
 
 <div class="cmstools-page-header">
     <div>
@@ -324,7 +181,6 @@
             <span>Table: <strong>@Model.Table.FullName</strong></span>
             <span class="ms-3">Total rows: <strong>@Model.Total</strong></span>
 
-            @* Badge chờ duyệt (chỉ cho bảng review) *@
             @if (isReviewTable)
             {
                 <span class="ms-3">
@@ -353,12 +209,10 @@
             Xuất CSV
         </a>
     </div>
-
-
 </div>
+
 @if (Model.FilterColumns != null && Model.FilterColumns.Count > 0)
 {
-    // Lấy 4 filter đầu làm "cơ bản", phần còn lại là nâng cao
     var basicFilters = Model.FilterColumns.Take(4).ToList();
     var advFilters = Model.FilterColumns.Skip(4).ToList();
 
@@ -369,9 +223,7 @@
                 <input type="hidden" name="page" value="1" />
                 <input type="hidden" name="pageSize" value="@Model.PageSize" />
 
-                <!-- HÀNG FILTER CƠ BẢN -->
                 <div class="row g-2 align-items-end cmstools-filter-row">
-                    @* 4 cột filter đầu *@
                     @foreach (var col in basicFilters)
                     {
                         var name = col.ColumnName;
@@ -382,10 +234,9 @@
                         var fmtRaw = col.Format ?? string.Empty;
                         var fmt = fmtRaw.ToLowerInvariant();
                         var colNameLower = (col.ColumnName ?? string.Empty).ToLowerInvariant();
-                        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant(); // nếu chưa có thì bỏ/dùng fmt
+                        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
 
-                        // ==== Detect loại cột ====
-                        bool isRangeCol = fmt.StartsWith("range:");    // range:date, range:number
+                        bool isRangeCol = fmt.StartsWith("range:");
 
                         bool isDateCol =
                         (!string.IsNullOrEmpty(dataType) && dataType.Contains("date"))
@@ -403,8 +254,7 @@
                         || colNameLower.StartsWith("is_")
                         || colNameLower.StartsWith("has_");
 
-                        bool isEnumCol =
-                        fmt.StartsWith("enum:");   // enum:0=New;1=Processing;2=Done
+                        bool isEnumCol = fmt.StartsWith("enum:");
 
                         bool isNumericCol =
                         dataType == "int"
@@ -421,21 +271,16 @@
                         <div class="col-12 col-md-6 col-xl-3">
                             <label class="form-label small mb-1">@label</label>
 
-                            @* ===== RANGE (DATE/NUMBER) – sinh 2 input ===== *@
                             @if (isRangeCol)
                             {
-                                // range:date, range:datetime, range:number, range:money...
                                 var parts = fmt.Split(':', 2);
-                                var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim(); // mặc định number
+                                var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim();
 
                                 bool isDateRange =
                                 rangeKind == "date"
                                 || rangeKind == "datetime"
                                 || rangeKind == "datetime2";
 
-                                // Tên querystring:
-                                // date  -> <col>_from / <col>_to
-                                // number-> <col>_min / <col>_max
                                 var fromKey = isDateRange ? $"{name}_from" : $"{name}_min";
                                 var toKey = isDateRange ? $"{name}_to" : $"{name}_max";
 
@@ -447,105 +292,73 @@
                                 var inputType = isDateRange ? "date" : "number";
 
                                 <div class="input-group input-group-sm">
-                                    <input name="@fromKey"
-                                           type="@inputType"
-                                           class="form-control"
-                                           value="@fromVal"
-                                           placeholder="Từ" />
+                                    <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
                                     <span class="input-group-text">–</span>
-                                    <input name="@toKey"
-                                           type="@inputType"
-                                           class="form-control"
-                                           value="@toVal"
-                                           placeholder="Đến" />
+                                    <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
                                 </div>
                             }
-                            @* ===== STATUS: DROPDOWN ĐẶC BIỆT ===== *@
                             else if (isStatusCol)
                             {
                                 <select name="@name" class="form-select form-select-sm">
-                                    <option value="">-- Tất cả --</option>
+                                    @Opt("", "-- Tất cả --", currentValue)
 
                                     @if (isReviewTable)
                                     {
-                                        <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Chờ duyệt</option>
-                                        <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Đã duyệt</option>
-                                        <option value="2" selected="@(currentValue == "2" ? "selected" : null)">Đã từ chối</option>
+                                        @Opt("0", "Chờ duyệt", currentValue)
+                                        @Opt("1", "Đã duyệt", currentValue)
+                                        @Opt("2", "Đã từ chối", currentValue)
                                     }
                                     else
                                     {
-                                        <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Active</option>
-                                        <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Inactive</option>
+                                        @Opt("1", "Active", currentValue)
+                                        @Opt("0", "Inactive", currentValue)
                                     }
                                 </select>
                             }
-                            @* ===== DATE/DATETIME: INPUT DATE ĐƠN ===== *@
                             else if (isDateCol)
                             {
-                                <input name="@name"
-                                       type="date"
-                                       class="form-control form-control-sm"
-                                       value="@currentValue" />
+                                <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
                             }
-                            @* ===== BOOL/BIT: DROPDOWN CÓ / KHÔNG ===== *@
                             else if (isBoolCol)
                             {
                                 <select name="@name" class="form-select form-select-sm">
-                                    <option value="">-- Tất cả --</option>
-                                    <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Có</option>
-                                    <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Không</option>
+                                    @Opt("", "-- Tất cả --", currentValue)
+                                    @Opt("1", "Có", currentValue)
+                                    @Opt("0", "Không", currentValue)
                                 </select>
                             }
-                            @* ===== ENUM TỔNG QUÁT TỪ Format: enum:... ===== *@
                             else if (isEnumCol)
                             {
-                                var rawEnum = fmtRaw.Substring("enum:".Length); // dùng fmtRaw để giữ hoa/thường, tiếng Việt
+                                var rawEnum = fmtRaw.Substring("enum:".Length);
                                 var options = new List<(string Value, string Text)>();
 
                                 foreach (var part in rawEnum.Split(';', StringSplitOptions.RemoveEmptyEntries))
                                 {
                                     var kv = part.Split('=', 2);
                                     var val = kv[0].Trim();
-                                    var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1])
-                                    ? kv[1].Trim()
-                                    : val;
-
-                                    if (!string.IsNullOrEmpty(val))
-                                    {
-                                        options.Add((val, text));
-                                    }
+                                    var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
+                                    if (!string.IsNullOrEmpty(val)) options.Add((val, text));
                                 }
 
                                 <select name="@name" class="form-select form-select-sm">
-                                    <option value="">-- Tất cả --</option>
+                                    @Opt("", "-- Tất cả --", currentValue)
                                     @foreach (var opt in options)
                                     {
-                                        <option value="@opt.Value"
-                                                selected="@(currentValue == opt.Value ? "selected" : null)">
-                                            @opt.Text
-                                        </option>
+                                        @Opt(opt.Value, opt.Text, currentValue)
                                     }
                                 </select>
                             }
-                            @* ===== NUMERIC: INPUT NUMBER ĐƠN ===== *@
                             else if (isNumericCol)
                             {
-                                <input name="@name"
-                                       type="number"
-                                       class="form-control form-control-sm"
-                                       value="@currentValue" />
+                                <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
                             }
-                            @* ===== MẶC ĐỊNH: TEXT ===== *@
                             else
                             {
-                                <input name="@name"
-                                       class="form-control form-control-sm"
-                                       value="@currentValue" />
+                                <input name="@name" class="form-control form-control-sm" value="@currentValue" />
                             }
                         </div>
                     }
 
-                    @* Checkbox nhanh "Chỉ hiện đánh giá chưa duyệt" nếu là bảng review *@
                     @if (isReviewTable)
                     {
                         <div class="col-12 col-md-4 col-xl-3">
@@ -562,15 +375,9 @@
                         </div>
                     }
 
-                    @* Nhóm nút hành động cho filter *@
                     <div class="col-12 col-md-auto ms-md-auto text-md-end mt-2 mt-md-0">
-                        <button type="submit" class="btn btn-primary btn-sm me-2">
-                            Lọc
-                        </button>
-                        <a class="btn btn-outline-secondary btn-sm me-2"
-                           href="/Data/List?tableId=@Model.Table.Id">
-                            Xoá lọc
-                        </a>
+                        <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
+                        <a class="btn btn-outline-secondary btn-sm me-2" href="/Data/List?tableId=@Model.Table.Id">Xoá lọc</a>
 
                         @if (advFilters.Any())
                         {
@@ -586,7 +393,6 @@
                     </div>
                 </div>
 
-                @* KHỐI FILTER NÂNG CAO *@
                 @if (advFilters.Any())
                 {
                     <div class="collapse mt-2" id="cmstoolsAdvancedFilters">
@@ -639,7 +445,6 @@
                                 <div class="col-12 col-md-6 col-xl-3">
                                     <label class="form-label small mb-1">@label</label>
 
-                                    @* giống y logic ở trên *@
                                     @if (isRangeCol)
                                     {
                                         var parts = fmt.Split(':', 2);
@@ -661,50 +466,39 @@
                                         var inputType = isDateRange ? "date" : "number";
 
                                         <div class="input-group input-group-sm">
-                                            <input name="@fromKey"
-                                                   type="@inputType"
-                                                   class="form-control"
-                                                   value="@fromVal"
-                                                   placeholder="Từ" />
+                                            <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
                                             <span class="input-group-text">–</span>
-                                            <input name="@toKey"
-                                                   type="@inputType"
-                                                   class="form-control"
-                                                   value="@toVal"
-                                                   placeholder="Đến" />
+                                            <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
                                         </div>
                                     }
                                     else if (isStatusCol)
                                     {
                                         <select name="@name" class="form-select form-select-sm">
-                                            <option value="">-- Tất cả --</option>
+                                            @Opt("", "-- Tất cả --", currentValue)
 
                                             @if (isReviewTable)
                                             {
-                                                <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Chờ duyệt</option>
-                                                <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Đã duyệt</option>
-                                                <option value="2" selected="@(currentValue == "2" ? "selected" : null)">Đã từ chối</option>
+                                                @Opt("0", "Chờ duyệt", currentValue)
+                                                @Opt("1", "Đã duyệt", currentValue)
+                                                @Opt("2", "Đã từ chối", currentValue)
                                             }
                                             else
                                             {
-                                                <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Active</option>
-                                                <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Inactive</option>
+                                                @Opt("1", "Active", currentValue)
+                                                @Opt("0", "Inactive", currentValue)
                                             }
                                         </select>
                                     }
                                     else if (isDateCol)
                                     {
-                                        <input name="@name"
-                                               type="date"
-                                               class="form-control form-control-sm"
-                                               value="@currentValue" />
+                                        <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
                                     }
                                     else if (isBoolCol)
                                     {
                                         <select name="@name" class="form-select form-select-sm">
-                                            <option value="">-- Tất cả --</option>
-                                            <option value="1" selected="@(currentValue == "1" ? "selected" : null)">Có</option>
-                                            <option value="0" selected="@(currentValue == "0" ? "selected" : null)">Không</option>
+                                            @Opt("", "-- Tất cả --", currentValue)
+                                            @Opt("1", "Có", currentValue)
+                                            @Opt("0", "Không", currentValue)
                                         </select>
                                     }
                                     else if (isEnumCol)
@@ -716,39 +510,25 @@
                                         {
                                             var kv = part.Split('=', 2);
                                             var val = kv[0].Trim();
-                                            var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1])
-                                            ? kv[1].Trim()
-                                            : val;
-
-                                            if (!string.IsNullOrEmpty(val))
-                                            {
-                                                options.Add((val, text));
-                                            }
+                                            var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
+                                            if (!string.IsNullOrEmpty(val)) options.Add((val, text));
                                         }
 
                                         <select name="@name" class="form-select form-select-sm">
-                                            <option value="">-- Tất cả --</option>
+                                            @Opt("", "-- Tất cả --", currentValue)
                                             @foreach (var opt in options)
                                             {
-                                                <option value="@opt.Value"
-                                                        selected="@(currentValue == opt.Value ? "selected" : null)">
-                                                    @opt.Text
-                                                </option>
+                                                @Opt(opt.Value, opt.Text, currentValue)
                                             }
                                         </select>
                                     }
                                     else if (isNumericCol)
                                     {
-                                        <input name="@name"
-                                               type="number"
-                                               class="form-control form-control-sm"
-                                               value="@currentValue" />
+                                        <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
                                     }
                                     else
                                     {
-                                        <input name="@name"
-                                               class="form-control form-control-sm"
-                                               value="@currentValue" />
+                                        <input name="@name" class="form-control form-control-sm" value="@currentValue" />
                                     }
                                 </div>
                             }
@@ -759,7 +539,6 @@
         </div>
     </div>
 }
-
 
 @if (Model.Rows == null || !Model.Rows.Any())
 {
@@ -772,12 +551,8 @@ else
             <table class="table table-striped table-sm table-bordered cmstools-table mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th class="cmstools-th cmstools-th-actions text-nowrap">
-                            Thao tác
-                        </th>
+                        <th class="cmstools-th cmstools-th-actions text-nowrap">Thao tác</th>
 
-
-                        @* Cột ID nếu có *@
                         @if (idCol != null)
                         {
                             <th class="cmstools-th text-nowrap" style="width:80px;">
@@ -785,7 +560,6 @@ else
                             </th>
                         }
 
-                        @* Các cột còn lại *@
                         @foreach (var c in otherCols)
                         {
                             var thStyle = BuildThStyle(c);
@@ -796,61 +570,44 @@ else
                     </tr>
                 </thead>
 
-
-
                 <tbody>
                     @foreach (System.Collections.Generic.IDictionary<string, object?> row in Model.Rows)
                     {
-                        // Lấy idValue một lần để dùng cho cả action + cột ID
                         object? idValue = null;
-                        if (row != null && row.ContainsKey("id"))
-                        {
-                            idValue = row["id"];
-                        }
+                        if (row != null && row.ContainsKey("id")) idValue = row["id"];
 
-                        // Lấy status của row (nếu có), dùng cho nút "Duyệt" của bảng review
                         byte reviewStatus = 0;
                         if (row != null && row.ContainsKey("status"))
-                        {
                             byte.TryParse(row["status"]?.ToString(), out reviewStatus);
-                        }
 
-                        // Lấy is_hidden nếu có (chỉ có ở bảng review)
                         bool isHidden = false;
                         if (row != null && row.ContainsKey("is_hidden"))
-                        {
                             bool.TryParse(row["is_hidden"]?.ToString(), out isHidden);
-                        }
 
                         <tr>
                             <td class="cmstools-td cmstools-td-actions">
                                 @if (idValue != null)
                                 {
-                                    <!-- NHÓM NÚT CHÍNH: Sửa / Chi tiết / Xem nhanh -->
                                     <div class="cmstools-actions-group d-flex flex-wrap">
-                                        @* Sửa (ưu tiên nếu có quyền update) *@
                                         @if (Model.Permission?.CanUpdate == true)
                                         {
                                             <button type="button"
                                                     class="btn btn-primary btn-sm cmstools-action-btn"
                                                     data-cms-modal="form"
                                                     data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                    data-url="@Url.Action("EditForm", "Data",
-                                                                                            new { tableId = Model.Table.Id, id = idValue })">
-                                Sửa
-                            </button>
-                                                        }
-                                        @* Chỉ xem khi không có CustomDetailUrl *@
-                                        else if (Model.Permission?.CanView == true
-                                        && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                                    data-url="@Url.Action("EditForm", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                                Sửa
+                                            </button>
+                                        }
+                                        else if (Model.Permission?.CanView == true && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
                                         {
                                             <a class="btn btn-outline-secondary btn-sm cmstools-action-btn"
-                                               href="/Data/Details?tableId=@Model.Table.Id&id=@idValue">
-                                                Xem
+                                               href="/Data/Details?tableId=@Model.Table.Id&id=@idValue"
+                                               target="_blank" rel="noopener">
+                                                Mở trang
                                             </a>
                                         }
 
-                                        @* Link chi tiết custom (Đơn hàng, v.v.) *@
                                         @if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
                                         {
                                             var idStr = idValue.ToString();
@@ -859,34 +616,29 @@ else
                                             .Replace("{pk}", idStr);
 
                                             <a class="btn btn-outline-primary btn-sm cmstools-action-btn"
-                                               href="@url">
-                                                Chi tiết
+                                               href="@url"
+                                               target="_blank" rel="noopener">
+                                                Mở trang
                                             </a>
                                         }
 
-                                        @* Xem nhanh trong modal *@
                                         <button type="button"
                                                 class="btn btn-outline-secondary btn-sm cmstools-action-btn"
                                                 data-cms-modal="row"
                                                 data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                data-url="@Url.Action("DetailsModal", "Data",
-                                                                                    new { tableId = Model.Table.Id, id = idValue })">
-                                <span class="cmstools-action-text">Xem nhanh</span>
-                            </button>
-                        </div>
+                                                data-url="@Url.Action("DetailsModal", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                            <span class="cmstools-action-text">Xem nhanh</span>
+                                        </button>
+                                    </div>
 
-                                    @* ====== NHÓM NÚT PHỤ TÙY THEO BẢNG ====== *@
-
-                                    @* 👉 Bảng REVIEW: Duyệt / Phản hồi + Ẩn/Hiện trên web *@
-                        @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
-                                                && Model.Permission?.CanUpdate == true)
+                                    @* Bảng REVIEW *@
+                                    @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
+                                                            && Model.Permission?.CanUpdate == true)
                                     {
                                         <div class="cmstools-actions-group d-flex flex-wrap mt-1">
                                             @{
                                                 var btnText = reviewStatus == 0 ? "Duyệt / Phản hồi" : "Xem / Phản hồi";
-                                                var btnClass = reviewStatus == 0
-                                                ? "btn-outline-primary"
-                                                : "btn-outline-info";
+                                                var btnClass = reviewStatus == 0 ? "btn-outline-primary" : "btn-outline-info";
                                             }
 
                                             <button type="button"
@@ -897,7 +649,6 @@ else
                                                 @btnText
                                             </button>
 
-                                            @* Ẩn/Hiện chỉ khi đã duyệt *@
                                             @if (reviewStatus == 1)
                                             {
                                                 var hideText = isHidden ? "Hiện trên web" : "Ẩn khỏi web";
@@ -911,8 +662,7 @@ else
                                                     @Html.AntiForgeryToken()
                                                     <input type="hidden" name="id" value="@idValue" />
                                                     <input type="hidden" name="isHidden" value="@newHiddenValue" />
-                                                    <button type="submit"
-                                                            class="btn btn-sm @hideClass cmstools-action-btn">
+                                                    <button type="submit" class="btn btn-sm @hideClass cmstools-action-btn">
                                                         @hideText
                                                     </button>
                                                 </form>
@@ -921,16 +671,13 @@ else
                                     }
                                     else
                                     {
-                                        @* 👉 Bảng KHÁC: nút Ẩn / Kích hoạt theo status *@
+                                        // Bảng khác: nút Ẩn/Kích hoạt nếu có cột status
                                         if (Model.Permission != null
                                         && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
                                         && Model.Columns.Any(x => x.ColumnName.Equals("status", StringComparison.OrdinalIgnoreCase)))
                                         {
                                             object? statusObj = null;
-                                            if (row != null && row.ContainsKey("status"))
-                                            {
-                                                statusObj = row["status"];
-                                            }
+                                            if (row != null && row.ContainsKey("status")) statusObj = row["status"];
 
                                             byte statusByte = 0;
                                             byte.TryParse(statusObj?.ToString(), out statusByte);
@@ -947,16 +694,14 @@ else
                                                     @if (statusByte == 1)
                                                     {
                                                         <input type="hidden" name="status" value="0" />
-                                                        <button type="submit"
-                                                                class="btn btn-sm btn-outline-warning cmstools-action-btn">
+                                                        <button type="submit" class="btn btn-sm btn-outline-warning cmstools-action-btn">
                                                             Ẩn
                                                         </button>
                                                     }
                                                     else
                                                     {
                                                         <input type="hidden" name="status" value="1" />
-                                                        <button type="submit"
-                                                                class="btn btn-sm btn-outline-success cmstools-action-btn">
+                                                        <button type="submit" class="btn btn-sm btn-outline-success cmstools-action-btn">
                                                             Kích hoạt
                                                         </button>
                                                     }
@@ -967,31 +712,20 @@ else
                                 }
                             </td>
 
-
-
-
-                            @* ==== CỘT ID (THỨ HAI) NẾU CÓ ==== *@
                             @if (idCol != null)
                             {
                                 object? cellId = null;
-                                if (row != null && row.ContainsKey(idCol.ColumnName))
-                                {
-                                    cellId = row[idCol.ColumnName];
-                                }
+                                if (row != null && row.ContainsKey(idCol.ColumnName)) cellId = row[idCol.ColumnName];
 
                                 <td class="cmstools-td text-nowrap">
                                     @RenderCell(idCol, cellId)
                                 </td>
                             }
 
-                            @* ==== CÁC CỘT DỮ LIỆU CÒN LẠI ==== *@
                             @foreach (var c in otherCols)
                             {
                                 object? cell = null;
-                                if (row != null && row.ContainsKey(c.ColumnName))
-                                {
-                                    cell = row[c.ColumnName];
-                                }
+                                if (row != null && row.ContainsKey(c.ColumnName)) cell = row[c.ColumnName];
 
                                 var isImageCol = IsImageColumn(c);
 
@@ -1006,21 +740,17 @@ else
                                     {
                                         <td class="cmstools-td">
                                             <a href="@url" target="_blank" rel="noopener noreferrer">
-                                                <img src="@url"
-                                                     alt="img"
-                                                     class="cmstools-img-thumb" />
+                                                <img src="@url" alt="img" class="cmstools-img-thumb" />
                                             </a>
                                         </td>
                                     }
                                 }
-                                else if (string.Equals(c.ColumnName, "status", System.StringComparison.OrdinalIgnoreCase)
-                                && cell is not null)
+                                else if (string.Equals(c.ColumnName, "status", StringComparison.OrdinalIgnoreCase) && cell is not null)
                                 {
                                     byte statusByte;
                                     if (byte.TryParse(cell.ToString(), out statusByte))
                                     {
                                         <td class="cmstools-td">
-                                            @* 🔹 Nếu là bảng review hoặc format = reviewStatus thì dùng 3 trạng thái *@
                                             @if (Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase)
                                                                     || string.Equals(c.Format, "reviewStatus", StringComparison.OrdinalIgnoreCase))
                                             {
@@ -1050,7 +780,6 @@ else
                                             }
                                             else
                                             {
-                                                @* Mặc định cho bảng khác: Active / Inactive *@
                                                 if (statusByte == 1)
                                                 {
                                                     <span class="badge bg-success">Active</span>
@@ -1075,9 +804,6 @@ else
                         </tr>
                     }
                 </tbody>
-
-
-
             </table>
         </div>
     </div>
@@ -1133,3 +859,109 @@ else
     </div>
 </div>
 
+@section Scripts {
+    <script>
+        // ===== Mở modal theo data-cms-modal =====
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('[data-cms-modal]');
+            if (!btn) return;
+
+            e.preventDefault();
+
+            const url = btn.getAttribute('data-url');
+            if (!url) return;
+
+            const modalEl = document.getElementById('cmsRowModal');
+            const modalBody = document.getElementById('cmsRowModalBody');
+            const modalTitleEl = document.getElementById('cmsRowModalTitle');
+
+            if (!modalEl || !modalBody) return;
+
+            const title = btn.getAttribute('data-title');
+            if (modalTitleEl && title) modalTitleEl.textContent = title;
+
+            modalBody.innerHTML = '<div class="text-center text-muted small p-3">Đang tải...</div>';
+
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(r => r.text())
+                .then(html => { modalBody.innerHTML = html; })
+                .catch(err => {
+                    console.error(err);
+                    modalBody.innerHTML = '<div class="text-danger p-3">Lỗi tải dữ liệu.</div>';
+                });
+
+            const bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+        });
+
+        // ===== AJAX submit cho form trong modal =====
+        document.addEventListener('submit', function (e) {
+            const form = e.target;
+            if (!form.matches('form[data-cms-ajax="true"], form[data_cms_ajax="true"]')) return;
+
+            if (!form.checkValidity()) return;
+
+            e.preventDefault();
+
+            const modalBody = document.getElementById('cmsRowModalBody');
+            if (modalBody) modalBody.classList.remove('cmstools-modal-error');
+
+            const action = form.getAttribute('action') || window.location.href;
+            const method = (form.getAttribute('method') || 'post').toUpperCase();
+
+            const fd = new FormData(form);
+
+            const submitter = e.submitter;
+            if (submitter && submitter.name) fd.append(submitter.name, submitter.value);
+
+            fetch(action, {
+                method: method,
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(async res => {
+                const ct = (res.headers.get('content-type') || '').toLowerCase();
+
+                if (ct.includes('application/json')) {
+                    const data = await res.json().catch(() => null);
+
+                    if (data && data.ok) {
+                        if (data.message) alert(data.message);
+                        window.location.reload();
+                        return;
+                    }
+
+                    alert((data && data.message) ? data.message : 'Có lỗi khi cập nhật, nhưng server không trả message.');
+                    return;
+                }
+
+                const html = await res.text();
+                if (modalBody) {
+                    modalBody.innerHTML = html;
+                    modalBody.classList.add('cmstools-modal-error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                if (modalBody) {
+                    modalBody.innerHTML = '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
+                    modalBody.classList.add('cmstools-modal-error');
+                }
+            });
+        });
+
+        // ===== Sync checkbox "Chỉ hiện đánh giá chưa duyệt" với dropdown status =====
+        document.addEventListener('change', function (e) {
+            const cb = e.target.closest('#filterOnlyPending');
+            if (!cb) return;
+
+            const form = cb.closest('form');
+            if (!form) return;
+
+            const statusSelect = form.querySelector('select[name="status"]');
+            if (!statusSelect) return;
+
+            statusSelect.value = cb.checked ? '0' : '';
+        });
+    </script>
+}

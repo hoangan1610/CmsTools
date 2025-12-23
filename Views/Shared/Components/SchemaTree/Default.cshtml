@@ -1,19 +1,70 @@
-﻿@model CmsTools.Models.SchemaTreeViewModel
+﻿@using System
+@using System.Linq
+@using System.Collections.Generic
+@model CmsTools.Models.SchemaTreeViewModel
 
-<div class="cmstree bg-light h-100">
-    <div class="p-2 border-bottom schema-tree-header">
-        <strong class="small text-uppercase text-muted">Connections</strong>
+@functions {
+    private static string Safe(string? s) => (s ?? "").Trim();
+
+    private static string PrettySchema(string? schema)
+    {
+        schema = Safe(schema);
+        if (string.IsNullOrWhiteSpace(schema) || schema.Equals("dbo", StringComparison.OrdinalIgnoreCase))
+            return "DATA";
+        return schema.ToUpperInvariant();
+    }
+
+    private static string PrettyTable(string? displayName, string? tableName)
+    {
+        if (!string.IsNullOrWhiteSpace(displayName))
+            return displayName.Trim();
+
+        var n = Safe(tableName);
+        foreach (var p in new[] { "tbl_", "tb_", "t_", "vw_", "view_", "v_" })
+            if (n.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                n = n.Substring(p.Length);
+
+        var parts = n.Split(new[] { '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return Safe(tableName);
+
+        return string.Join(" ", parts.Select(w =>
+            w.Length == 0 ? "" : char.ToUpperInvariant(w[0]) + w.Substring(1)));
+    }
+}
+
+@{
+    var totalTables = Model.Items?.Sum(x => x.Tables?.Count ?? 0) ?? 0;
+}
+
+<div class="cms-tree" id="cmsTreeRoot">
+    <div class="cms-tree-header">
+        <div class="d-flex align-items-center">
+            <div class="cms-tree-title">CONNECTIONS</div>
+            <span class="badge cms-pill ms-auto" id="cmsTreeTotal">@totalTables</span>
+        </div>
+
+        <div class="cms-tree-search mt-2">
+            <i class="bi bi-search cms-search-ico"></i>
+            <input id="cmsTreeSearch"
+                   class="form-control form-control-sm cms-search"
+                   placeholder="Tìm bảng… (tên / tbl_...)"
+                   autocomplete="off" />
+            <button type="button" class="btn btn-sm btn-light border cms-clear"
+                    id="cmsTreeClear" title="Xoá">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <div class="cms-tree-hint small text-muted mt-2" id="cmsTreeHint"></div>
     </div>
 
     @if (Model.Items == null || Model.Items.Count == 0)
     {
-        <div class="p-2 small text-muted">
-            Chưa có bảng nào được cấp quyền xem.
-        </div>
+        <div class="p-2 small text-muted">Chưa có bảng nào được cấp quyền xem.</div>
     }
     else
     {
-        <div class="accordion accordion-flush" id="cmsTreeAccordion">
+        <div class="cms-tree-body">
             @{
                 var idx = 0;
             }
@@ -21,50 +72,405 @@
             @foreach (var node in Model.Items)
             {
                 var connId = node.Connection.Id;
-                var headingId = $"cms-conn-{connId}-head";
-                var collapseId = $"cms-conn-{connId}-body";
-                var expanded = idx == 0; // mở connection đầu tiên
-                idx++;
+                var collapseId = $"cmsConn_{connId}";
+                var expanded = idx == 0; idx++;
 
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="@headingId">
-                        <button class="accordion-button @(expanded ? "" : "collapsed") small"
-                                type="button"
-                                data-bs-toggle="collapse"
-                                data-bs-target="#@collapseId"
-                                aria-expanded="@(expanded.ToString().ToLower())"
-                                aria-controls="@collapseId">
-                            @node.Connection.Name
-                        </button>
-                    </h2>
-                    <div id="@collapseId"
-                         class="accordion-collapse collapse @(expanded ? "show" : "")"
-                         aria-labelledby="@headingId"
-                         data-bs-parent="#cmsTreeAccordion">
-                        <div class="accordion-body p-0">
-                            <ul class="list-group list-group-flush cmstree-tables">
-                                @foreach (var t in node.Tables)
-                                {
-                                    var isActive = Model.CurrentTableId.HasValue
-                                    && Model.CurrentTableId.Value == t.Id;
+                <div class="cms-conn" data-conn>
+                    <button class="cms-conn-btn"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#@collapseId"
+                            aria-expanded="@(expanded.ToString().ToLower())"
+                            aria-controls="@collapseId">
+                        <span class="cms-conn-left">
+                            <i class="bi bi-hdd-network"></i>
+                            <span class="cms-conn-name">@node.Connection.Name</span>
+                        </span>
 
-                                    <li class="list-group-item list-group-item-action px-2 py-1 @(isActive ? "active" : "")">
-                                        <a class="d-flex justify-content-between align-items-center text-decoration-none @(isActive ? "text-white" : "")"
-                                           href="/Data/List?tableId=@t.Id">
-                                            <span class="small text-truncate me-2">
-                                                @(t.DisplayName ?? t.TableName)
-                                            </span>
-                                            <span class="badge bg-secondary bg-opacity-50 text-wrap schema-badge-schema">
-                                                @t.SchemaName.@t.TableName
-                                            </span>
-                                        </a>
-                                    </li>
-                                }
-                            </ul>
+                        <span class="cms-conn-right">
+                            <span class="badge cms-pill" data-conn-count>@(node.Tables?.Count ?? 0)</span>
+                            <i class="bi bi-chevron-down cms-conn-chevron"></i>
+                        </span>
+                    </button>
+
+                    <div id="@collapseId" class="collapse @(expanded ? "show" : "")">
+                        <div class="cms-conn-panel">
+                            @{
+                                var tables = node.Tables ?? new List<CmsTools.Models.CmsTableMeta>();
+                                var groups = tables
+                                .GroupBy(t => string.IsNullOrWhiteSpace(Safe(t.SchemaName)) ? "dbo" : Safe(t.SchemaName))
+                                .OrderBy(g => g.Key);
+                            }
+
+                            @foreach (var g in groups)
+                            {
+                                var schemaKey = string.IsNullOrWhiteSpace(Safe(g.Key)) ? "dbo" : Safe(g.Key);
+                                var schemaLabel = PrettySchema(schemaKey);
+
+                                <div class="cms-schema" data-schema>
+                                    <div class="cms-schema-head">
+                                        <span class="cms-schema-name">@schemaLabel</span>
+                                        <span class="badge rounded-pill text-bg-light border ms-auto" data-schema-count>@g.Count()</span>
+                                    </div>
+
+                                    <ul class="cms-table-list">
+                                        @foreach (var t in g.OrderBy(x => x.TableName))
+                                        {
+                                            var isActive = Model.CurrentTableId.HasValue && Model.CurrentTableId.Value == t.Id;
+                                            var title = PrettyTable(t.DisplayName, t.TableName);
+                                            var rawTable = Safe(t.TableName);
+
+                                            var hay = (node.Connection.Name + " " + schemaLabel + " " + title + " " + rawTable + " " + Safe(t.SchemaName))
+                                            .ToLowerInvariant();
+
+                                            <li class="cms-table-item @(isActive ? "is-active" : "")"
+                                                data-item
+                                                data-search="@hay">
+                                                <a class="cms-table-link"
+                                                   href="/Data/List?tableId=@t.Id"
+                                                   title="@rawTable">
+                                                    <span class="cms-table-left">
+                                                        @if (t.IsView)
+                                                        {
+                                                            <i class="bi bi-window"></i>
+                                                        }
+                                                        else
+                                                        {
+
+                                                            <i class="bi bi-table"></i>
+                                                        }
+
+                                                        <span class="cms-table-textwrap">
+                                                            <span class="cms-table-title">@title</span>
+                                                            <span class="cms-table-raw">@rawTable</span>
+                                                        </span>
+                                                    </span>
+
+                                                    <span class="cms-table-right">
+                                                        @if (t.IsView)
+                                                        {
+                                                            <span class="badge rounded-pill text-bg-secondary">View</span>
+                                                        }
+                                                    </span>
+                                                </a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
                         </div>
                     </div>
                 </div>
             }
+
+            <div class="p-2 small text-muted d-none" id="cmsTreeEmpty">Không có kết quả phù hợp.</div>
         </div>
     }
 </div>
+
+<style>
+    .cms-tree {
+        background: #fff;
+    }
+
+    .cms-tree-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #fff;
+        padding: .65rem .65rem .55rem;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .cms-tree-title {
+        font-size: .74rem;
+        font-weight: 600;
+        letter-spacing: .10em;
+        color: #6c757d;
+    }
+
+    .cms-pill {
+        background: #f8f9fa;
+        color: #111827;
+        border: 1px solid rgba(0,0,0,.10);
+        font-weight: 600;
+    }
+
+    .cms-tree-search {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: .45rem;
+    }
+
+    .cms-search-ico {
+        position: absolute;
+        left: .55rem;
+        color: #6c757d;
+        pointer-events: none;
+        font-size: .95rem;
+    }
+
+    .cms-search {
+        padding-left: 1.75rem;
+        border-radius: 14px;
+    }
+
+    .cms-clear {
+        width: 36px;
+        height: 31px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .cms-conn {
+        padding: .35rem .45rem 0;
+    }
+
+    .cms-conn-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .5rem;
+        padding: .55rem .6rem;
+        border-radius: 14px;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #f8fafc;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .cms-conn-left {
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        min-width: 0;
+    }
+
+    .cms-conn-name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+    }
+
+    .cms-conn-right {
+        display: inline-flex;
+        align-items: center;
+        gap: .45rem;
+    }
+
+    .cms-conn-chevron {
+        opacity: .7;
+        transition: transform .18s ease;
+    }
+
+    .cms-conn-btn[aria-expanded="true"] .cms-conn-chevron {
+        transform: rotate(180deg);
+    }
+
+    .cms-conn-panel {
+        margin-top: .45rem;
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 14px;
+        background: #fff;
+        padding: .55rem .55rem .35rem;
+    }
+
+    .cms-schema-head {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .15rem .2rem .35rem;
+    }
+
+    .cms-schema-name {
+        font-size: .72rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        color: #64748b;
+    }
+
+    .cms-table-list {
+        list-style: none;
+        margin: 0 0 .55rem 0;
+        padding: 0;
+    }
+
+    .cms-table-item {
+        margin: 2px 0;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    .cms-table-link {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: .5rem;
+        padding: .5rem .55rem;
+        text-decoration: none;
+        color: #111827;
+        border: 1px solid transparent;
+        background: transparent;
+    }
+
+    .cms-table-left {
+        display: flex;
+        align-items: flex-start;
+        gap: .55rem;
+        min-width: 0;
+        flex: 1;
+    }
+
+        .cms-table-left i {
+            margin-top: .1rem;
+            opacity: .85;
+        }
+
+    .cms-table-textwrap {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .cms-table-title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        font-weight: 600;
+        font-size: .92rem;
+        line-height: 1.15rem;
+    }
+
+    .cms-table-raw {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-top: .12rem;
+        font-size: .78rem;
+        color: #6b7280;
+        font-weight: 700;
+        line-height: 1.05rem;
+        word-break: break-word;
+    }
+
+    .cms-table-item:hover .cms-table-link {
+        background: #f8fafc;
+        border-color: rgba(0,0,0,.06);
+    }
+
+    .cms-table-item.is-active .cms-table-link {
+        background: #0d6efd;
+        color: #fff;
+        border-color: rgba(13,110,253,.35);
+        box-shadow: 0 8px 20px rgba(13,110,253,.18);
+        position: relative;
+    }
+
+        .cms-table-item.is-active .cms-table-link::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: rgba(255,255,255,.85);
+        }
+
+    .cms-table-item.is-active .cms-table-left i {
+        color: rgba(255,255,255,.95) !important;
+    }
+
+    .cms-table-item.is-active .cms-table-raw {
+        color: rgba(255,255,255,.85);
+    }
+
+    @@media (max-width:576px) {
+        .cms-conn-name {
+            max-width: 120px;
+        }
+    }
+</style>
+
+<script>
+    (function () {
+        const root = document.getElementById('cmsTreeRoot');
+        if (!root) return;
+
+        const input = root.querySelector('#cmsTreeSearch');
+        const clearBtn = root.querySelector('#cmsTreeClear');
+        const empty = root.querySelector('#cmsTreeEmpty');
+        const hint = root.querySelector('#cmsTreeHint');
+        const totalBadge = root.querySelector('#cmsTreeTotal');
+        const initialTotal = totalBadge ? totalBadge.textContent : '';
+
+        const items = Array.from(root.querySelectorAll('[data-item]'));
+        const schemas = Array.from(root.querySelectorAll('[data-schema]'));
+        const conns = Array.from(root.querySelectorAll('[data-conn]'));
+
+        function countVisible(scope) {
+            const list = Array.from(scope.querySelectorAll('[data-item]'));
+            return list.filter(li => li.style.display !== 'none').length;
+        }
+
+        function applyFilter() {
+            const q = (input.value || '').trim().toLowerCase();
+            let visibleItems = 0;
+
+            items.forEach(li => {
+                const hay = (li.getAttribute('data-search') || '');
+                const ok = (!q || hay.includes(q));
+                li.style.display = ok ? '' : 'none';
+                if (ok) visibleItems++;
+            });
+
+            schemas.forEach(sch => {
+                const v = countVisible(sch);
+                sch.style.display = v > 0 ? '' : 'none';
+                const badge = sch.querySelector('[data-schema-count]');
+                if (badge) badge.textContent = v;
+            });
+
+            conns.forEach(conn => {
+                const v = countVisible(conn);
+                conn.style.display = v > 0 ? '' : 'none';
+                const badge = conn.querySelector('[data-conn-count]');
+                if (badge) badge.textContent = v;
+
+                if (q && v > 0) {
+                    const collapseEl = conn.querySelector('.collapse');
+                    if (collapseEl && window.bootstrap) {
+                        bootstrap.Collapse.getOrCreateInstance(collapseEl, { toggle: false }).show();
+                    }
+                }
+            });
+
+            if (empty) empty.classList.toggle('d-none', visibleItems > 0);
+            if (hint) hint.textContent = q ? `Kết quả: ${visibleItems} bảng` : '';
+            if (totalBadge) totalBadge.textContent = q ? visibleItems : initialTotal;
+
+            if (clearBtn) clearBtn.disabled = !q;
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                input.value = '';
+                input.focus();
+                applyFilter();
+            });
+        }
+
+        let t = null;
+        input.addEventListener('input', function () {
+            clearTimeout(t);
+            t = setTimeout(applyFilter, 80);
+        });
+
+        applyFilter();
+    })();
+</script>
