@@ -4,15 +4,18 @@ using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
 using System.Linq;
+using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace CmsTools.Controllers
 {
@@ -21,12 +24,22 @@ namespace CmsTools.Controllers
     {
         private readonly string _hafConn;
         private readonly IRevenueAiInsightService _revAi;
+        private readonly IMemoryCache _cache;
+        private readonly IConfiguration _cfg;
+        private readonly ILogger<ReportsController> _logger;
 
-        public ReportsController(IConfiguration cfg, IRevenueAiInsightService revAi)
+        public ReportsController(
+            IConfiguration cfg,
+            IRevenueAiInsightService revAi,
+            IMemoryCache cache,
+            ILogger<ReportsController> logger)
         {
+            _cfg = cfg;
             _hafConn = cfg.GetConnectionString("HAFoodDb")
                 ?? throw new Exception("Missing connection string: HAFoodDb");
             _revAi = revAi;
+            _cache = cache;
+            _logger = logger;
         }
 
         private static DateTime GetVnNow()
@@ -70,18 +83,86 @@ namespace CmsTools.Controllers
             }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> Revenue(DateTime? fromDate, DateTime? toDate, string? groupBy)
+        private static string GetClaimOrEmpty(ClaimsPrincipal user, params string[] claimTypes)
         {
-            var vnToday = GetVnNow().Date;
+            foreach (var t in claimTypes)
+            {
+                var v = user.FindFirstValue(t);
+                if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+            }
+            return "";
+        }
 
-            var from = (fromDate ?? vnToday.AddDays(-6));
-            var to = (toDate ?? vnToday);
+        private string GetTenantKey()
+        {
+            // Tuỳ hệ thống bạn, bổ sung claim type ở đây
+            var tenant =
+                GetClaimOrEmpty(User, "tenant_id", "TenantId", "tenant", "shop_id", "ShopId", "ClientId");
 
-            NormalizeDateRange(ref from, ref to, maxDays: 366);
+            return string.IsNullOrWhiteSpace(tenant) ? "tenant:default" : ("tenant:" + tenant);
+        }
 
-            var gb = NormalizeGroupBy(groupBy);
+        private string GetUserKey()
+        {
+            var uid =
+                GetClaimOrEmpty(User, ClaimTypes.NameIdentifier, "sub", "user_id", "UserId");
 
+            if (string.IsNullOrWhiteSpace(uid))
+                uid = User?.Identity?.Name ?? "anonymous";
+
+            return "user:" + uid.Trim();
+        }
+
+        private static string BuildFiltersKey(Microsoft.AspNetCore.Http.IQueryCollection q)
+        {
+            // Lấy hết querystring làm "filters" (trừ các key không liên quan nếu muốn)
+            // Bạn có thể loại thêm các key như "page", "format"... tuỳ dự án
+            var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // "format", "page"
+            };
+
+            var parts = q
+                .Where(kv => !ignored.Contains(kv.Key))
+                .Select(kv =>
+                {
+                    var key = kv.Key.Trim();
+                    var val = string.Join("|", kv.Value.ToArray()).Trim();
+                    return (k: key, v: val);
+                })
+                .OrderBy(x => x.k, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(x => x.v, StringComparer.OrdinalIgnoreCase)
+                .Select(x => $"{x.k}={x.v}");
+
+            return string.Join("&", parts);
+        }
+
+        private string BuildRevenueAiCacheKey(DateTime from, DateTime to, string groupBy)
+        {
+            // key bao gồm: tenant + user + range + groupBy + toàn bộ filters
+            var tenantKey = GetTenantKey();
+            var userKey = GetUserKey();
+
+            var filtersKey = BuildFiltersKey(Request.Query);
+
+            return $"rev-ai|{tenantKey}|{userKey}|from:{from:yyyyMMdd}|to:{to:yyyyMMdd}|gb:{groupBy}|q:{filtersKey}";
+        }
+
+        private MemoryCacheEntryOptions BuildAiCacheOptions()
+        {
+            // 10–30 phút, default 20
+            var minutes = _cfg.GetValue<int?>("Reports:RevenueAi:CacheMinutes") ?? 20;
+            if (minutes < 10) minutes = 10;
+            if (minutes > 30) minutes = 30;
+
+            return new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(minutes)
+            };
+        }
+
+        private async Task<RevenueReportViewModel> BuildRevenueVmAsync(DateTime from, DateTime to, string gb, CancellationToken ct)
+        {
             var vm = new RevenueReportViewModel
             {
                 FromDate = from,
@@ -90,7 +171,7 @@ namespace CmsTools.Controllers
             };
 
             await using var conn = new SqlConnection(_hafConn);
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
 
             // ----- Kỳ hiện tại -----
             var p = new DynamicParameters();
@@ -133,26 +214,143 @@ namespace CmsTools.Controllers
                 ? (vm.Overview.TotalOrders - vm.PreviousOverview.TotalOrders) * 100m / vm.PreviousOverview.TotalOrders
                 : (vm.Overview.TotalOrders > 0 ? 100m : 0m);
 
-            // ✅ AI insight: dùng linked token + giới hạn thời gian
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromMinutes(3));
-            vm.Ai = await _revAi.BuildAsync(vm, cts.Token);
+            // Không chạy AI ở đây
+            vm.Ai = null;
 
-            return View(vm);
+            return vm;
         }
+
+        // ===========================
+        // 1) PAGE: Revenue (render nhanh, không gọi AI)
+        // ===========================
         [HttpGet]
-        public async Task<IActionResult> ReorderSuggest(
-    DateTime? fromDate,
-    DateTime? toDate,
-    int horizonDays = 30,
-    decimal safetyFactor = 1.20m,
-    int topN = 200,
-    bool onlyActive = true,
-    bool includeZeroSales = false)
+        public async Task<IActionResult> Revenue(DateTime? fromDate, DateTime? toDate, string? groupBy)
         {
             var vnToday = GetVnNow().Date;
 
-            // mặc định lấy dữ liệu bán 30 ngày gần nhất để dự báo tháng tới
+            var from = (fromDate ?? vnToday.AddDays(-6));
+            var to = (toDate ?? vnToday);
+
+            NormalizeDateRange(ref from, ref to, maxDays: 366);
+            var gb = NormalizeGroupBy(groupBy);
+
+            var vm = await BuildRevenueVmAsync(from, to, gb, HttpContext.RequestAborted);
+            return View(vm);
+        }
+
+        // ===========================
+        // 2) API: RevenueAi (chỉ chạy khi user bấm nút)
+        // - Có cache 10–30 phút theo key (tenant+user+range+gb+filters)
+        // - force=true để bỏ cache (nếu user muốn chạy lại)
+        // ===========================
+        [HttpGet]
+        public async Task<IActionResult> RevenueAi(DateTime fromDate, DateTime toDate, string? groupBy, bool force = false)
+        {
+            var from = fromDate;
+            var to = toDate;
+
+            NormalizeDateRange(ref from, ref to, maxDays: 366);
+            var gb = NormalizeGroupBy(groupBy);
+
+            var cacheKey = BuildRevenueAiCacheKey(from, to, gb);
+
+            if (!force && _cache.TryGetValue(cacheKey, out RevenueAiInsightResult cached) && cached != null)
+            {
+                return Ok(new
+                {
+                    ok = true,
+                    cached = true,
+                    data = cached
+                });
+            }
+
+            // Giới hạn thời gian AI (mặc định 3 phút)
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
+            var timeoutSec = _cfg.GetValue<int?>("Reports:RevenueAi:TimeoutSeconds") ?? 180;
+            if (timeoutSec < 30) timeoutSec = 30;
+            if (timeoutSec > 300) timeoutSec = 300;
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
+
+            try
+            {
+                // rebuild vm để có dữ liệu đúng filter hiện tại
+                var vm = await BuildRevenueVmAsync(from, to, gb, cts.Token);
+
+                // Nếu không có dữ liệu thì khỏi gọi AI
+                if (vm.Rows == null || vm.Rows.Count == 0)
+                {
+                    var empty = new RevenueAiInsightResult
+                    {
+                        Summary = "Không có dữ liệu trong khoảng lọc.",
+                        Highlights = new(),
+                        Alerts = new()
+                    };
+
+                    _cache.Set(cacheKey, empty, BuildAiCacheOptions());
+                    return Ok(new { ok = true, cached = false, data = empty });
+                }
+
+                var ai = await _revAi.BuildAsync(vm, cts.Token);
+
+                if (ai == null)
+                {
+                    return Ok(new
+                    {
+                        ok = false,
+                        cached = false,
+                        message = "AI timeout hoặc bị huỷ.",
+                        data = (RevenueAiInsightResult?)null
+                    });
+                }
+
+                _cache.Set(cacheKey, ai, BuildAiCacheOptions());
+
+                return Ok(new
+                {
+                    ok = true,
+                    cached = false,
+                    data = ai
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                return Ok(new
+                {
+                    ok = false,
+                    cached = false,
+                    message = "AI timeout hoặc người dùng huỷ request.",
+                    data = (RevenueAiInsightResult?)null
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "RevenueAi failed");
+                return Ok(new
+                {
+                    ok = false,
+                    cached = false,
+                    message = "AI gặp lỗi.",
+                    data = (RevenueAiInsightResult?)null
+                });
+            }
+        }
+
+        // ===========================
+        // giữ nguyên các action khác của bạn
+        // ===========================
+
+        [HttpGet]
+        public async Task<IActionResult> ReorderSuggest(
+            DateTime? fromDate,
+            DateTime? toDate,
+            int horizonDays = 30,
+            decimal safetyFactor = 1.20m,
+            int topN = 200,
+            bool onlyActive = true,
+            bool includeZeroSales = false)
+        {
+            var vnToday = GetVnNow().Date;
+
             var from = (fromDate ?? vnToday.AddDays(-29));
             var to = (toDate ?? vnToday);
 
@@ -222,7 +420,7 @@ namespace CmsTools.Controllers
             {
                 overview = await multi.ReadFirstOrDefaultAsync<RevenueOverview>() ?? new RevenueOverview();
                 rows = await multi.ReadAsync<RevenueByPeriodRow>();
-                _ = await multi.ReadAsync<RevenueByProviderRow>(); // consume
+                _ = await multi.ReadAsync<RevenueByProviderRow>();
             }
 
             var sb = new StringBuilder();

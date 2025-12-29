@@ -44,9 +44,46 @@
     }
     var onlyPendingChecked = isReviewTable && statusFilterValue == "0";
 }
+@{
+    var lookupsRaw = ViewBag.Lookups as Dictionary<string, List<(string Value, string Text)>>;
+
+    var lookupMap = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+    if (lookupsRaw != null)
+    {
+        foreach (var kv in lookupsRaw)
+        {
+            var m = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var it in kv.Value)
+            {
+                if (!string.IsNullOrWhiteSpace(it.Value) && !m.ContainsKey(it.Value))
+                    m[it.Value] = it.Text;
+            }
+            lookupMap[kv.Key] = m;
+        }
+    }
+}
 
 @functions {
-    // Render option KHÔNG dính selected="@( ... )" để né RZ1031
+
+    bool IsFkColumn(CmsTools.Models.CmsColumnMeta col)
+    {
+        var fmt = (col.Format ?? "").Trim();
+        return fmt.StartsWith("fk:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    string RenderFkCell(
+        CmsTools.Models.CmsColumnMeta col,
+        object? value,
+        IDictionary<string, Dictionary<string, string>> map)
+    {
+        if (value == null || value is DBNull) return string.Empty;
+
+        var key = value.ToString() ?? "";
+        if (map.TryGetValue(col.ColumnName, out var m) && m.TryGetValue(key, out var text))
+            return text;
+
+        return key; // fallback: vẫn hiện id nếu không tìm thấy
+    }
     IHtmlContent Opt(string value, string text, string current)
     {
         var opt = new TagBuilder("option");
@@ -127,7 +164,6 @@
             return s;
         }
 
-        // Format riêng cho status review (khi dùng ở cell bình thường)
         if (lower == "reviewstatus")
         {
             if (byte.TryParse(s, out var b))
@@ -398,6 +434,7 @@
                     <div class="collapse mt-2" id="cmstoolsAdvancedFilters">
                         <div class="border-top pt-2 mt-1"></div>
                         <div class="row g-2 cmstools-filter-advanced">
+                            @* giữ nguyên phần advanced của bạn *@
                             @foreach (var col in advFilters)
                             {
                                 var name = col.ColumnName;
@@ -631,7 +668,6 @@ else
                                         </button>
                                     </div>
 
-                                    @* Bảng REVIEW *@
                                     @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
                                                             && Model.Permission?.CanUpdate == true)
                                     {
@@ -671,7 +707,6 @@ else
                                     }
                                     else
                                     {
-                                        // Bảng khác: nút Ẩn/Kích hoạt nếu có cột status
                                         if (Model.Permission != null
                                         && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
                                         && Model.Columns.Any(x => x.ColumnName.Equals("status", StringComparison.OrdinalIgnoreCase)))
@@ -796,6 +831,12 @@ else
                                         <td class="cmstools-td">@RenderCell(c, cell)</td>
                                     }
                                 }
+                                else if (IsFkColumn(c))
+                                {
+                                    <td class="cmstools-td">@RenderFkCell(c, cell, lookupMap)</td>
+                                }
+                        
+
                                 else
                                 {
                                     <td class="cmstools-td">@RenderCell(c, cell)</td>
@@ -832,125 +873,9 @@ else
     </nav>
 }
 
-<!-- Modal xem nhanh 1 bản ghi (luôn luôn render) -->
-<div class="modal fade" id="cmsRowModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h5 class="modal-title" id="cmsRowModalTitle">
-                    Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName)
-                </h5>
-                <button type="button" class="btn-close"
-                        data-bs-dismiss="modal"
-                        aria-label="Close"></button>
-            </div>
-            <div class="modal-body" id="cmsRowModalBody">
-                <div class="text-center text-muted small p-3">
-                    Đang tải...
-                </div>
-            </div>
-            <div class="modal-footer py-2">
-                <button type="button" class="btn btn-outline-secondary btn-sm"
-                        data-bs-dismiss="modal">
-                    Đóng
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
 @section Scripts {
     <script>
-        // ===== Mở modal theo data-cms-modal =====
-        document.addEventListener('click', function (e) {
-            const btn = e.target.closest('[data-cms-modal]');
-            if (!btn) return;
-
-            e.preventDefault();
-
-            const url = btn.getAttribute('data-url');
-            if (!url) return;
-
-            const modalEl = document.getElementById('cmsRowModal');
-            const modalBody = document.getElementById('cmsRowModalBody');
-            const modalTitleEl = document.getElementById('cmsRowModalTitle');
-
-            if (!modalEl || !modalBody) return;
-
-            const title = btn.getAttribute('data-title');
-            if (modalTitleEl && title) modalTitleEl.textContent = title;
-
-            modalBody.innerHTML = '<div class="text-center text-muted small p-3">Đang tải...</div>';
-
-            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                .then(r => r.text())
-                .then(html => { modalBody.innerHTML = html; })
-                .catch(err => {
-                    console.error(err);
-                    modalBody.innerHTML = '<div class="text-danger p-3">Lỗi tải dữ liệu.</div>';
-                });
-
-            const bsModal = new bootstrap.Modal(modalEl);
-            bsModal.show();
-        });
-
-        // ===== AJAX submit cho form trong modal =====
-        document.addEventListener('submit', function (e) {
-            const form = e.target;
-            if (!form.matches('form[data-cms-ajax="true"], form[data_cms_ajax="true"]')) return;
-
-            if (!form.checkValidity()) return;
-
-            e.preventDefault();
-
-            const modalBody = document.getElementById('cmsRowModalBody');
-            if (modalBody) modalBody.classList.remove('cmstools-modal-error');
-
-            const action = form.getAttribute('action') || window.location.href;
-            const method = (form.getAttribute('method') || 'post').toUpperCase();
-
-            const fd = new FormData(form);
-
-            const submitter = e.submitter;
-            if (submitter && submitter.name) fd.append(submitter.name, submitter.value);
-
-            fetch(action, {
-                method: method,
-                body: fd,
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-            .then(async res => {
-                const ct = (res.headers.get('content-type') || '').toLowerCase();
-
-                if (ct.includes('application/json')) {
-                    const data = await res.json().catch(() => null);
-
-                    if (data && data.ok) {
-                        if (data.message) alert(data.message);
-                        window.location.reload();
-                        return;
-                    }
-
-                    alert((data && data.message) ? data.message : 'Có lỗi khi cập nhật, nhưng server không trả message.');
-                    return;
-                }
-
-                const html = await res.text();
-                if (modalBody) {
-                    modalBody.innerHTML = html;
-                    modalBody.classList.add('cmstools-modal-error');
-                }
-            })
-            .catch(err => {
-                console.error(err);
-                if (modalBody) {
-                    modalBody.innerHTML = '<div class="text-danger p-3">Lỗi gửi dữ liệu.</div>';
-                    modalBody.classList.add('cmstools-modal-error');
-                }
-            });
-        });
-
-        // ===== Sync checkbox "Chỉ hiện đánh giá chưa duyệt" với dropdown status =====
+        // ✅ Chỉ giữ sync checkbox -> dropdown status (modal đã xử lý ở site.js)
         document.addEventListener('change', function (e) {
             const cb = e.target.closest('#filterOnlyPending');
             if (!cb) return;

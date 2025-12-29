@@ -379,40 +379,47 @@
     }
 </div>
 
-@if (Model.Ai != null)
-{
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="d-flex align-items-center justify-content-between mb-2">
-                <div class="fw-semibold">AI Insights</div>
-                <span class="badge bg-light text-muted border">Beta</span>
+<div class="card mb-3" id="aiCard">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="fw-semibold">AI Insights</div>
+            <span class="badge bg-light text-muted border">Beta</span>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center mb-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnAiRun">
+                Phân tích AI
+            </button>
+
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAiForce" style="display:none;">
+                Chạy lại (bỏ cache)
+            </button>
+
+            <div class="small text-muted" id="aiHint">
+                (Chỉ chạy khi bạn bấm nút. Kết quả được cache 10–30 phút.)
+            </div>
+        </div>
+
+        <div id="aiLoading" class="text-muted small" style="display:none;">Đang phân tích…</div>
+        <div id="aiError" class="text-danger small" style="display:none;"></div>
+
+        <div id="aiContent" style="display:none;">
+            <div id="aiSummary" class="mb-2"></div>
+
+            <div id="aiHighlightsWrap" style="display:none;">
+                <div class="small text-muted fw-semibold">Điểm nổi bật</div>
+                <ul id="aiHighlights" class="mb-2"></ul>
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(Model.Ai.Summary))
-            {
-                <div class="mb-2">@Model.Ai.Summary</div>
-            }
-
-            @if (Model.Ai.Highlights?.Any() == true)
-            {
-                <div class="small text-muted fw-semibold">Điểm nổi bật</div>
-                <ul class="mb-2">
-                    @foreach (var h in Model.Ai.Highlights) { <li>@h</li> }
-                </ul>
-            }
-
-            @if (Model.Ai.Alerts?.Any() == true)
-            {
+            <div id="aiAlertsWrap" style="display:none;">
                 <div class="small text-muted fw-semibold">Cảnh báo</div>
-                <ul class="mb-0">
-                    @foreach (var a in Model.Ai.Alerts) { <li>@a</li> }
-                </ul>
-            }
+                <ul id="aiAlerts" class="mb-0"></ul>
+            </div>
         </div>
     </div>
-}
+</div>
 
-@* ==== BIỂU ĐỒ TREND ==== *@
+
 @if (hasRows)
 {
     <div class="card mb-3 report-chart-card">
@@ -941,4 +948,127 @@ else
             }
         })();
     </script>
+
+    <script>
+(function () {
+  "use strict";
+
+  const btnRun = document.getElementById("btnAiRun");
+  const btnForce = document.getElementById("btnAiForce");
+  const loading = document.getElementById("aiLoading");
+  const errBox = document.getElementById("aiError");
+
+  const content = document.getElementById("aiContent");
+  const summaryEl = document.getElementById("aiSummary");
+
+  const hiWrap = document.getElementById("aiHighlightsWrap");
+  const hiUl = document.getElementById("aiHighlights");
+
+  const alWrap = document.getElementById("aiAlertsWrap");
+  const alUl = document.getElementById("aiAlerts");
+
+  const fromStr = "@Model.FromDate.ToString("yyyy-MM-dd")";
+  const toStr   = "@Model.ToDate.ToString("yyyy-MM-dd")";
+  const groupBy = "@Model.GroupBy";
+
+  function setBusy(isBusy) {
+    btnRun.disabled = isBusy;
+    loading.style.display = isBusy ? "block" : "none";
+  }
+
+  function resetUi() {
+    errBox.style.display = "none";
+    errBox.textContent = "";
+
+    content.style.display = "none";
+    summaryEl.textContent = "";
+
+    hiWrap.style.display = "none";
+    hiUl.innerHTML = "";
+
+    alWrap.style.display = "none";
+    alUl.innerHTML = "";
+  }
+
+  function render(ai, cached) {
+    resetUi();
+
+    if (!ai) {
+      errBox.textContent = "Không có dữ liệu AI.";
+      errBox.style.display = "block";
+      return;
+    }
+
+    // show force button sau khi có kết quả
+    btnForce.style.display = "inline-block";
+
+    // summary
+    summaryEl.textContent = ai.summary || "";
+    if (cached) {
+      // thêm hint nhỏ nếu muốn
+      const span = document.createElement("span");
+      span.className = "badge bg-light text-muted border ms-2";
+      span.textContent = "cache";
+      summaryEl.appendChild(span);
+    }
+
+    // highlights
+    if (ai.highlights && ai.highlights.length) {
+      hiWrap.style.display = "block";
+      hiUl.innerHTML = ai.highlights.map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    }
+
+    // alerts
+    if (ai.alerts && ai.alerts.length) {
+      alWrap.style.display = "block";
+      alUl.innerHTML = ai.alerts.map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    }
+
+    content.style.display = "block";
+  }
+
+  async function runAi(force) {
+    resetUi();
+    setBusy(true);
+
+    try {
+      const url = new URL("@Url.Action("RevenueAi", "Reports")", window.location.origin);
+      url.searchParams.set("fromDate", fromStr);
+      url.searchParams.set("toDate", toStr);
+      url.searchParams.set("groupBy", groupBy);
+      if (force) url.searchParams.set("force", "true");
+
+      const res = await fetch(url.toString(), { method: "GET" });
+      const json = await res.json();
+
+      if (!json || json.ok !== true) {
+        const msg = (json && json.message) ? json.message : "AI không phản hồi.";
+        errBox.textContent = msg;
+        errBox.style.display = "block";
+        return;
+      }
+
+      render(json.data, json.cached === true);
+    } catch (e) {
+      errBox.textContent = "Lỗi tải AI: " + (e && e.message ? e.message : e);
+      errBox.style.display = "block";
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (btnRun) {
+    btnRun.addEventListener("click", function () { runAi(false); });
+  }
+  if (btnForce) {
+    btnForce.addEventListener("click", function () { runAi(true); });
+  }
+
+  function escapeHtml(s) {
+    s = (s ?? "").toString();
+    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+})();
+</script>
+
 }

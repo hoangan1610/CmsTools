@@ -709,4 +709,42 @@
         height: auto;
         max-height: 60vh;
     }
+
+}
+
+/* Ép mọi content trong modal-body full ngang */
+.modal-body > * {
+    width: 100%;
+    min-width: 0;
+}
+
+/* Nếu modal-body đang bị d-flex thì ép nó xếp dọc */
+.modal-body.d-flex {
+    flex-direction: column;
+}
+
+/* Nếu form là flex-item bị co */
+.modal-body > form.cms-form,
+.modal-body .cms-form {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+}
+
+/* ===== FIX: textarea trong modal bị co nhỏ ===== */
+#cmsModalBody textarea,
+#cmsModalBody textarea.form-control {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+}
+
+/* Nếu có container nào vô tình là flex khiến con bị shrink */
+#cmsModalBody,
+#cmsModalBody > form,
+#cmsModalBody .cms-form,
+#cmsModalBody .row,
+#cmsModalBody .cms-field {
+    min-width: 0 !important;
 }

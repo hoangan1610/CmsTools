@@ -13,6 +13,7 @@ builder.Services.AddSingleton<ICmsPasswordHasher, CmsPasswordHasher>();
 // ===== cấu hình SmtpOptions =====
 builder.Services.Configure<SmtpOptions>(
     builder.Configuration.GetSection("Smtp"));
+builder.Services.AddMemoryCache();
 
 // Email sender
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
@@ -63,18 +64,24 @@ Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
 builder.Services.AddHttpClient("OpenAI", (sp, http) =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = (cfg["OpenAI:BaseUrl"] ?? "").TrimEnd('/') + "/";
-    http.BaseAddress = new Uri(baseUrl);
+    var rawBaseUrl = (cfg["OpenAI:BaseUrl"] ?? "").Trim();
+    if (string.IsNullOrWhiteSpace(rawBaseUrl))
+        throw new Exception("Missing config: OpenAI:BaseUrl");
+
+    var baseUrl = rawBaseUrl.TrimEnd('/') + "/";
+    http.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
 
     http.Timeout = TimeSpan.FromMinutes(5);
 
     http.DefaultRequestHeaders.Accept.Clear();
     http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-    var apiKey = cfg["OpenAI:ApiKey"];
-    if (!string.IsNullOrWhiteSpace(apiKey))
-        http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", apiKey);
+    var apiKey = (cfg["OpenAI:ApiKey"] ?? "").Trim();
+    if (!string.IsNullOrWhiteSpace(apiKey) && !apiKey.Equals("none", StringComparison.OrdinalIgnoreCase))
+    {
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    }
+
 });
 
 builder.Services.AddScoped<IRevenueAiInsightService, RevenueAiInsightService>();

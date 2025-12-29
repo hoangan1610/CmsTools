@@ -1,275 +1,439 @@
 ﻿@model CmsTools.Models.DataEditViewModel
 @using CmsTools.Models
 @using System.Globalization
+@using System.Linq
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Html
 
 @functions {
+    // ===== Attr helpers (Razor-safe) =====
+    IHtmlContent BoolAttr(string name, bool on) => on ? new HtmlString(name) : HtmlString.Empty;
+    IHtmlContent IntAttr(string name, int? v) => v.HasValue ? new HtmlString($"{name}=\"{v.Value}\"") : HtmlString.Empty;
+    IHtmlContent StepAttr(string? step) => !string.IsNullOrWhiteSpace(step)
+        ? new HtmlString($"step=\"{HtmlEncoder.Default.Encode(step)}\"")
+        : HtmlString.Empty;
+
     bool IsTextArea(CmsColumnMeta col)
     {
-        var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
-        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+        var name = (col.ColumnName ?? "").ToLowerInvariant();
+        var dt = (col.DataType ?? "").ToLowerInvariant();
 
-        if (name.Contains("description") ||
-            name.Contains("mo_ta") ||
-            name.Contains("content") ||
-            name.Contains("noi_dung") ||
-            name.Contains("note") ||
-            name.Contains("ghi_chu"))
+        if (name.Contains("description") || name.Contains("mo_ta") ||
+            name.Contains("detail") || name.Contains("content") || name.Contains("noi_dung") ||
+            name.Contains("note") || name.Contains("ghi_chu"))
             return true;
 
-        if (dataType.Contains("text"))
-            return true;
-
-        if ((dataType.StartsWith("nvarchar") || dataType.StartsWith("varchar")) &&
-            dataType.Contains("(max)"))
-            return true;
+        if (dt.Contains("text")) return true;
+        if ((dt.StartsWith("nvarchar") || dt.StartsWith("varchar")) && dt.Contains("(max)")) return true;
 
         return false;
     }
 
     bool IsImageCol(CmsColumnMeta col)
     {
-        var name = col.ColumnName ?? string.Empty;
-
-        if (!string.IsNullOrEmpty(col.Format) &&
-            col.Format.Equals("image", System.StringComparison.OrdinalIgnoreCase))
+        var name = col.ColumnName ?? "";
+        if (!string.IsNullOrWhiteSpace(col.Format) &&
+            col.Format.Equals("image", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (name.IndexOf("image", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("img", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("photo", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("avatar", System.StringComparison.OrdinalIgnoreCase) >= 0)
-            return true;
-
-        return false;
+        return name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("img", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("photo", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("avatar", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    bool IsBoolCol(CmsColumnMeta col)
+    bool IsBoolCol(CmsColumnMeta col) => (col.DataType ?? "").ToLowerInvariant().StartsWith("bit");
+
+    bool IsNumeric(CmsColumnMeta col)
     {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-        return t.StartsWith("bit");
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        return t.StartsWith("bigint") || t.StartsWith("int") || t.StartsWith("smallint") || t.StartsWith("tinyint")
+            || t.StartsWith("decimal") || t.StartsWith("numeric") || t.StartsWith("float") || t.StartsWith("real");
     }
 
-    string InputTypeFor(CmsColumnMeta col)
+    bool IsDateTimeLike(CmsColumnMeta col)
     {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-
-        if (t.StartsWith("bigint") ||
-            t.StartsWith("int") ||
-            t.StartsWith("smallint") ||
-            t.StartsWith("tinyint") ||
-            t.StartsWith("decimal") ||
-            t.StartsWith("numeric"))
-            return "number";
-
-        if (t.StartsWith("datetime") || t.StartsWith("date"))
-            return "text";
-
-        return "text";
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        return t.StartsWith("datetime") || t.StartsWith("datetime2") || t.StartsWith("smalldatetime") || t.StartsWith("date");
     }
+
+    string InputTypeFor(CmsColumnMeta col) => IsNumeric(col) ? "number" : "text";
 
     string? StepFor(CmsColumnMeta col)
     {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-        if (t.StartsWith("decimal") || t.StartsWith("numeric"))
-            return "0.01";
-
-        if (t.StartsWith("tinyint") || t.StartsWith("smallint") || t.StartsWith("int") || t.StartsWith("bigint"))
-            return "1";
-
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        if (t.StartsWith("decimal") || t.StartsWith("numeric")) return "0.01";
+        if (t.StartsWith("tinyint") || t.StartsWith("smallint") || t.StartsWith("int") || t.StartsWith("bigint")) return "1";
         return null;
     }
 
     string GetValueText(CmsColumnMeta col, IDictionary<string, object?> values)
     {
-        if (values == null) return string.Empty;
-
-        if (!values.TryGetValue(col.ColumnName, out var v) || v == null || v is DBNull)
-            return string.Empty;
-
-        return v.ToString() ?? string.Empty;
+        if (values == null) return "";
+        if (!values.TryGetValue(col.ColumnName, out var v) || v == null || v is DBNull) return "";
+        return v.ToString() ?? "";
     }
 
     bool GetBoolValue(CmsColumnMeta col, IDictionary<string, object?> values)
     {
-        var text = GetValueText(col, values).Trim();
-        if (string.IsNullOrEmpty(text)) return false;
-
-        if (text == "1") return true;
-        if (text == "0") return false;
-        if (text.Equals("true", System.StringComparison.OrdinalIgnoreCase)) return true;
-        if (text.Equals("false", System.StringComparison.OrdinalIgnoreCase)) return false;
-
+        var s = GetValueText(col, values).Trim();
+        if (string.IsNullOrEmpty(s)) return false;
+        if (s == "1") return true;
+        if (s == "0") return false;
+        if (s.Equals("true", StringComparison.OrdinalIgnoreCase)) return true;
+        if (s.Equals("false", StringComparison.OrdinalIgnoreCase)) return false;
         return false;
     }
 
-    bool IsRequired(CmsColumnMeta col)
-    {
-        return col.IsEditable && !col.IsNullable && string.IsNullOrWhiteSpace(col.DefaultExpr);
-    }
+    bool IsRequired(CmsColumnMeta col) => col.IsEditable && !col.IsNullable && string.IsNullOrWhiteSpace(col.DefaultExpr);
 
     int? GetMaxLength(CmsColumnMeta col)
     {
-        var dt = (col.DataType ?? string.Empty).ToLowerInvariant();
-        int start = dt.IndexOf('(');
-        int end = dt.IndexOf(')');
-        if (start > 0 && end > start)
+        var dt = (col.DataType ?? "").ToLowerInvariant();
+        int s = dt.IndexOf('(');
+        int e = dt.IndexOf(')');
+        if (s > 0 && e > s)
         {
-            var inside = dt.Substring(start + 1, end - start - 1).Trim();
-            if (inside.Equals("max", StringComparison.OrdinalIgnoreCase))
-                return null;
-
-            if (int.TryParse(inside, out var len) && len > 0)
-                return len;
+            var inside = dt.Substring(s + 1, e - s - 1).Trim();
+            if (inside.Equals("max", StringComparison.OrdinalIgnoreCase)) return null;
+            if (int.TryParse(inside, out var len) && len > 0) return len;
         }
         return null;
     }
+
+    bool IsEnumCol(CmsColumnMeta col) => (col.Format ?? "").StartsWith("enum:", StringComparison.OrdinalIgnoreCase);
+    bool IsFkCol(CmsColumnMeta col) => (col.Format ?? "").StartsWith("fk:", StringComparison.OrdinalIgnoreCase);
+
+    List<(string V, string T)> ParseEnum(string format)
+    {
+        var raw = format.Substring(5);
+        return raw.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                  .Select(x => x.Split('=', 2))
+                  .Where(p => p.Length == 2)
+                  .Select(p => (p[0].Trim(), p[1].Trim()))
+                  .ToList();
+    }
+
+    bool IsWideField(CmsColumnMeta col) => IsTextArea(col) || IsImageCol(col);
 }
 
 @{
+    var lookups = ViewBag.Lookups as Dictionary<string, List<(string Value, string Text)>>;
     var pkName = Model.PrimaryKeyColumn;
     var pkValue = Model.PrimaryKeyValue;
 }
+
+<style>
+    .cms-form .form-control, .cms-form .form-select {
+        width: 100% !important;
+    }
+
+    .cms-form .cms-field {
+        padding: .5rem .85rem .85rem;
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 1rem;
+        background: #fff;
+        box-shadow: 0 1px 0 rgba(0,0,0,.02);
+    }
+
+    .cms-form .cms-label {
+        font-weight: 650;
+    }
+
+    .cms-form .cms-help {
+        font-size: .825rem;
+        color: #6c757d;
+    }
+
+    .cms-form details > summary {
+        cursor: pointer;
+        user-select: none;
+        color: #6c757d;
+        font-size: .85rem;
+    }
+
+    .cms-form textarea.form-control {
+        min-height: 220px;
+        resize: vertical;
+        line-height: 1.4;
+    }
+
+    .cms-counter {
+        font-size: .8rem;
+        color: #6c757d;
+    }
+
+        .cms-counter strong {
+            color: #111827;
+        }
+
+    .cms-img-preview {
+        max-height: 180px;
+        display: none;
+        max-width: 100%;
+        object-fit: contain;
+        border-radius: .75rem;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fafafa;
+    }
+
+    .cms-readonly {
+        background: #f8f9fa !important;
+        color: #6b7280;
+    }
+</style>
 
 <form asp-action="Edit"
       asp-controller="Data"
       asp-route-tableId="@Model.Table.Id"
       asp-route-id="@pkValue"
       method="post"
-      data-cms-ajax="true">
+      data-cms-ajax="true"
+      novalidate
+      class="cms-form"
+      data-cms-form="1">
 
     @Html.AntiForgeryToken()
 
-    @* PK readonly *@
-    <div class="mb-3">
-        <label class="form-label">@pkName (PK)</label>
-        <input type="text"
-               class="form-control"
-               value="@pkValue"
-               readonly />
-    </div>
-
     @if (!ViewData.ModelState.IsValid)
     {
-        <div class="alert alert-danger py-2">
+        <div class="alert alert-danger py-2 mb-3">
             Có lỗi khi lưu. Vui lòng kiểm tra lại các trường dữ liệu.
         </div>
     }
 
-    @foreach (var col in Model.Columns)
-    {
-        if (col.IsPrimary)
-            continue;
-
-        var label = col.DisplayName ?? col.ColumnName;
-        var name = col.ColumnName;
-        var currentText = GetValueText(col, Model.Values);
-        var required = IsRequired(col);
-        var maxLen = GetMaxLength(col);
-
-        if (!col.IsEditable)
-        {
-            <div class="mb-3">
-                <label class="form-label">@label (readonly)</label>
-                <input type="text"
-                       class="form-control"
-                       value="@currentText"
-                       readonly />
-
-                @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
-                {
-                    <div class="form-text">
-                        default_expr: <code>@col.DefaultExpr</code>
-                    </div>
-                }
-            </div>
-
-            continue;
-        }
-
-        <div class="mb-3">
-            <label class="form-label">@label</label>
-
-            @* TEXTAREA *@
-            @if (IsTextArea(col))
-            {
-                <textarea name="@name"
-                  class="form-control"
-                  rows="3"
-                  @(required ? "required" : "")
-                  @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "")>@currentText</textarea>
-            }
-            @* BOOL (bit) -> checkbox *@
-            else if (IsBoolCol(col))
-            {
-                var isChecked = GetBoolValue(col, Model.Values);
-
-                <div class="form-check form-switch">
-                    <input class="form-check-input"
-                           type="checkbox"
-                           id="field_@name"
-                           name="@name"
-                           value="1"
-                           @(isChecked ? "checked" : "") />
-                    <label class="form-check-label" for="field_@name">
-                        Bật / tắt (@label)
-                    </label>
-                </div>
-            }
-            @* IMAGE URL + PREVIEW *@
-            else if (IsImageCol(col))
-            {
-                if (!string.IsNullOrWhiteSpace(currentText))
-                {
-                    <div class="mb-2">
-                        <a href="@currentText" target="_blank" rel="noopener noreferrer">
-                            <img src="@currentText"
-                                 alt="preview"
-                                 style="max-height:120px;max-width:100%;object-fit:contain;" />
-                        </a>
-                    </div>
-                }
-
-                <input name="@name"
-                       class="form-control"
-                       type="text"
-                       value="@currentText"
-                       @(required ? "required" : "")
-                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
-
-                <small class="text-muted">
-                    Dán URL ảnh (CDN / UploadImages.aspx) vào đây.
-                </small>
-            }
-            @* CÁC KIỂU CÒN LẠI *@
-            else
-            {
-                var inputType = InputTypeFor(col);
-                var step = StepFor(col);
-
-                <input name="@name"
-                       class="form-control"
-                       type="@inputType"
-                       value="@currentText"
-                       @(step != null ? $"step=\"{step}\"" : "")
-                       @(required ? "required" : "")
-                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
-            }
-
-            <div class="form-text">
-                <small>
-                    Kiểu: <code>@col.DataType</code>
-                    @if (!string.IsNullOrWhiteSpace(col.Format))
-                    {
-                        @: | Format: <code>@col.Format</code>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
-                    {
-                        @: | default_expr: <code>@col.DefaultExpr</code>
-                    }
-                </small>
-            </div>
+    <div class="mb-3 cms-field">
+        <div class="d-flex align-items-center justify-content-between">
+            <div class="cms-label">@pkName (PK)</div>
+            <span class="badge text-bg-light">Readonly</span>
         </div>
-    }
+        <input type="text" class="form-control mt-2 cms-readonly" value="@pkValue" readonly />
+    </div>
 
-    <button type="submit" class="btn btn-primary">Lưu</button>
+    <div class="row g-3">
+        @foreach (var col in Model.Columns)
+        {
+            if (col.IsPrimary) { continue; }
+
+            var name = col.ColumnName ?? "";
+            if (string.IsNullOrWhiteSpace(name)) { continue; }
+
+            var label = col.DisplayName ?? name;
+            var required = IsRequired(col);
+            var maxLen = GetMaxLength(col);
+            var currentText = GetValueText(col, Model.Values);
+
+            var colClass = IsWideField(col) ? "col-12" : "col-12 col-lg-6";
+            var placeholder = IsDateTimeLike(col) ? "dd/MM/yyyy" : "";
+            var helpId = $"help_{name}";
+            var counterId = $"counter_{name}";
+
+            <div class="@colClass">
+                <div class="cms-field">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <label class="form-label cms-label mb-1" for="field_@name">
+                            @label
+                            @if (required)
+                            {
+                                <span class="text-danger">*</span>
+                            }
+                            @if (!col.IsEditable)
+                            {
+                                <span class="badge text-bg-light ms-2">readonly</span>
+                            }
+                        </label>
+
+                        @if (maxLen.HasValue && col.IsEditable)
+                        {
+                            <div id="@counterId" class="cms-counter" aria-live="polite"></div>
+                        }
+                    </div>
+
+                    @if (!col.IsEditable)
+                    {
+                        <input class="form-control cms-readonly" value="@currentText" readonly />
+                        <div id="@helpId" class="cms-help mt-2">Trường này không cho sửa theo cấu hình metadata.</div>
+                    }
+                    else if (IsFkCol(col) && lookups != null && lookups.TryGetValue(name, out var items) && items != null)
+                    {
+                        var searchId = $"search_{name}";
+                        <input id="@searchId" type="search" class="form-control mb-2"
+                               placeholder="Gõ để lọc danh sách..." autocomplete="off" />
+
+                        <select id="field_@name"
+                                name="@name"
+                                class="form-select"
+                                data-filter-input="@searchId"
+                                aria-describedby="@helpId"
+                                @BoolAttr("required", required)>
+                            <option value="" selected="@(string.IsNullOrWhiteSpace(currentText) ? "selected" : null)">-- Không có / Root --</option>
+                            @foreach (var it in items)
+                            {
+                                <option value="@it.Value" selected="@(currentText == it.Value ? "selected" : null)">@it.Text</option>
+                            }
+                        </select>
+
+                        <div id="@helpId" class="cms-help mt-2">Chọn từ danh sách (FK).</div>
+                    }
+                    else if (IsEnumCol(col))
+                    {
+                        var opts = ParseEnum(col.Format!);
+                        <select id="field_@name" name="@name" class="form-select" aria-describedby="@helpId" @BoolAttr("required", required)>
+                            @foreach (var o in opts)
+                            {
+                                <option value="@o.V" selected="@(currentText == o.V ? "selected" : null)">@o.T</option>
+                            }
+                        </select>
+                        <div id="@helpId" class="cms-help mt-2">Chọn từ danh sách (Enum).</div>
+                    }
+                    else if (IsTextArea(col))
+                    {
+                        <textarea id="field_@name"
+                          name="@name"
+                          class="form-control"
+                          rows="10"
+                          data-autogrow="1"
+                          aria-describedby="@helpId"
+                          @BoolAttr("required", required)
+                          @IntAttr("maxlength", maxLen)>@currentText</textarea>
+
+                        <div id="@helpId" class="cms-help mt-2">Có thể nhập nội dung dài. Kéo góc dưới để phóng to thêm.</div>
+                    }
+                    else if (IsBoolCol(col))
+                    {
+                        var isChecked = GetBoolValue(col, Model.Values);
+                        <input type="hidden" name="@name" value="0" />
+                        <div class="form-check form-switch mt-2">
+                            <input class="form-check-input" type="checkbox" id="field_@name" name="@name" value="1"
+                                   aria-describedby="@helpId"
+                                   @(isChecked ? "checked" : null) />
+                            <label class="form-check-label" for="field_@name">Bật / tắt</label>
+                        </div>
+                        <div id="@helpId" class="cms-help mt-2">Giá trị kiểu bit (0/1).</div>
+                    }
+                    else if (IsImageCol(col))
+                    {
+                        var openId = $"open_{name}";
+                        var imgId = $"preview_{name}";
+                        var fileId = $"file_{name}";
+                        var statusId = $"upstatus_{name}";
+                        var clearId = $"clear_{name}";
+
+                        <div class="input-group">
+                            <input id="field_@name"
+                                   name="@name"
+                                   class="form-control"
+                                   type="text"
+                                   value="@currentText"
+                                   placeholder="Dán URL ảnh hoặc chọn file để upload..."
+                                   data-preview-img="@imgId"
+                                   data-open-link="@openId"
+                                   data-clear-btn="@clearId"
+                                   aria-describedby="@helpId"
+                                   @BoolAttr("required", required)
+                                   @IntAttr("maxlength", maxLen) />
+                            <a class="btn btn-outline-secondary disabled" id="@openId" href="javascript:void(0)" target="_blank" rel="noopener">Mở</a>
+                            <button class="btn btn-outline-danger" type="button" id="@clearId" title="Xoá giá trị">Xoá</button>
+                        </div>
+
+                        <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                            <input id="@fileId"
+                                   type="file"
+                                   class="form-control form-control-sm cms-img-file"
+                                   accept="image/*"
+                                   data-target-input="field_@name"
+                                   data-status-id="@statusId" />
+                            <span id="@statusId" class="small text-muted"></span>
+                        </div>
+
+                        <div class="mt-2">
+                            <img id="@imgId" class="cms-img-preview" alt="preview" />
+                        </div>
+
+                        <div id="@helpId" class="cms-help mt-2">Chọn ảnh để upload lên HAFood API hoặc dán URL.</div>
+                    }
+                    else
+                    {
+                        var inputType = InputTypeFor(col);
+                        var step = StepFor(col);
+                        var inputMode = IsNumeric(col) ? "decimal" : "text";
+
+                        <input id="field_@name"
+                               name="@name"
+                               class="form-control"
+                               type="@inputType"
+                               value="@currentText"
+                               placeholder="@placeholder"
+                               inputmode="@inputMode"
+                               aria-describedby="@helpId"
+                               @BoolAttr("required", required)
+                               @IntAttr("maxlength", maxLen)
+                               @StepAttr(step) />
+
+                        <div id="@helpId" class="cms-help mt-2">
+                            @if (IsDateTimeLike(col))
+                            {
+                                <text>Định dạng gợi ý: dd/MM/yyyy.</text>
+                            }
+                            else
+                            {
+
+                                <text>&nbsp;</text>
+                            }
+                        </div>
+                    }
+
+                    <details class="mt-2">
+                        <summary>Thông tin kỹ thuật</summary>
+                        <div class="cms-help mt-2">
+                            Kiểu: <code>@col.DataType</code>
+                            @if (!string.IsNullOrWhiteSpace(col.Format))
+                            {
+                                <text> | Format: </text>
+                                <code>@col.Format</code>
+     }
+                            @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                            {
+                                <text> | default_expr: </text>
+                                <code>@col.DefaultExpr</code>
+     }
+                            @if (maxLen.HasValue)
+                            {
+                                <text> | max: </text>
+                                <code>@maxLen.Value</code>
+     }
+                        </div>
+                    </details>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+        <button type="submit" class="btn btn-primary px-4">Lưu</button>
+        <a class="btn btn-outline-secondary" href="@Url.Action("List", "Data", new { tableId = Model.Table.Id })">Quay lại</a>
+    </div>
 </form>
+
+<script>
+    (function () {
+      // reuse y hệt Create (để modal inject vẫn chạy)
+      if (!window.cmsCreateFormInit) {
+        // nếu bạn tách file, thì đảm bảo Create script load trước
+        // ở đây fallback đơn giản: không làm gì
+      }
+
+      function cmsEditFormInit(root) {
+        if (window.cmsCreateFormInit) return window.cmsCreateFormInit(root);
+      }
+
+      window.cmsEditFormInit = cmsEditFormInit;
+
+      // auto-init khi load page thường (không modal)
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => cmsEditFormInit(document));
+      } else {
+        cmsEditFormInit(document);
+      }
+    })();
+</script>

@@ -1,232 +1,728 @@
 ﻿@model CmsTools.Models.DataCreateViewModel
 @using CmsTools.Models
 @using System.Globalization
+@using System.Linq
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Html
 
 @functions {
+    // ===== Razor-safe attribute helpers =====
+    IHtmlContent BoolAttr(string name, bool on) => on ? new HtmlString(name) : HtmlString.Empty;
+    IHtmlContent IntAttr(string name, int? v) => v.HasValue ? new HtmlString($"{name}=\"{v.Value}\"") : HtmlString.Empty;
+    IHtmlContent StepAttr(string? step) => !string.IsNullOrWhiteSpace(step)
+        ? new HtmlString($"step=\"{HtmlEncoder.Default.Encode(step)}\"")
+        : HtmlString.Empty;
+
+    // ===== Heuristics =====
     bool IsTextArea(CmsColumnMeta col)
     {
-        var name = (col.ColumnName ?? string.Empty).ToLowerInvariant();
-        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+        var name = (col.ColumnName ?? "").ToLowerInvariant();
+        var dt = (col.DataType ?? "").ToLowerInvariant();
 
-        if (name.Contains("description") ||
-            name.Contains("mo_ta") ||
-            name.Contains("content") ||
-            name.Contains("noi_dung") ||
-            name.Contains("note") ||
-            name.Contains("ghi_chu"))
+        if (name.Contains("description") || name.Contains("mo_ta") ||
+            name.Contains("detail") || name.Contains("content") || name.Contains("noi_dung") ||
+            name.Contains("note") || name.Contains("ghi_chu"))
             return true;
 
-        if (dataType.Contains("text"))
-            return true;
-
-        if ((dataType.StartsWith("nvarchar") || dataType.StartsWith("varchar")) &&
-            dataType.Contains("(max)"))
-            return true;
+        if (dt.Contains("text")) return true;
+        if ((dt.StartsWith("nvarchar") || dt.StartsWith("varchar")) && dt.Contains("(max)")) return true;
 
         return false;
     }
 
     bool IsImageCol(CmsColumnMeta col)
     {
-        var name = col.ColumnName ?? string.Empty;
-
-        if (!string.IsNullOrEmpty(col.Format) &&
-            col.Format.Equals("image", System.StringComparison.OrdinalIgnoreCase))
+        var name = col.ColumnName ?? "";
+        if (!string.IsNullOrWhiteSpace(col.Format) &&
+            col.Format.Equals("image", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (name.IndexOf("image", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("img", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("photo", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-            name.IndexOf("avatar", System.StringComparison.OrdinalIgnoreCase) >= 0)
-            return true;
+        return name.IndexOf("image", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("img", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("photo", StringComparison.OrdinalIgnoreCase) >= 0
+            || name.IndexOf("avatar", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    bool IsBoolCol(CmsColumnMeta col) => (col.DataType ?? "").ToLowerInvariant().StartsWith("bit");
+
+    bool IsNumeric(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        return t.StartsWith("bigint") || t.StartsWith("int") || t.StartsWith("smallint") || t.StartsWith("tinyint")
+            || t.StartsWith("decimal") || t.StartsWith("numeric") || t.StartsWith("float") || t.StartsWith("real");
+    }
+
+    bool IsDateTimeLike(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        return t.StartsWith("datetime") || t.StartsWith("datetime2") || t.StartsWith("smalldatetime") || t.StartsWith("date");
+    }
+
+    string InputTypeFor(CmsColumnMeta col) => IsNumeric(col) ? "number" : "text";
+
+    string? StepFor(CmsColumnMeta col)
+    {
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        if (t.StartsWith("decimal") || t.StartsWith("numeric")) return "0.01";
+        if (t.StartsWith("tinyint") || t.StartsWith("smallint") || t.StartsWith("int") || t.StartsWith("bigint")) return "1";
+        return null;
+    }
+
+    bool IsRequired(CmsColumnMeta col) => col.IsEditable && !col.IsNullable && string.IsNullOrWhiteSpace(col.DefaultExpr);
+
+    int? GetMaxLength(CmsColumnMeta col)
+    {
+        var dt = (col.DataType ?? "").ToLowerInvariant();
+        int s = dt.IndexOf('(');
+        int e = dt.IndexOf(')');
+        if (s > 0 && e > s)
+        {
+            var inside = dt.Substring(s + 1, e - s - 1).Trim();
+            if (inside.Equals("max", StringComparison.OrdinalIgnoreCase)) return null;
+            if (int.TryParse(inside, out var len) && len > 0) return len;
+        }
+        return null;
+    }
+
+    bool IsEnumCol(CmsColumnMeta col) => (col.Format ?? "").StartsWith("enum:", StringComparison.OrdinalIgnoreCase);
+    bool IsFkCol(CmsColumnMeta col) => (col.Format ?? "").StartsWith("fk:", StringComparison.OrdinalIgnoreCase);
+
+    System.Collections.Generic.List<(string V, string T)> ParseEnum(string format)
+    {
+        var raw = format.Substring(5);
+        return raw.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                  .Select(x => x.Split('=', 2))
+                  .Where(p => p.Length == 2)
+                  .Select(p => (p[0].Trim(), p[1].Trim()))
+                  .ToList();
+    }
+
+    bool IsSystemAutoDefault(CmsColumnMeta col)
+    {
+        var d = (col.DefaultExpr ?? "").ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(d)) return false;
+        if (d.Contains("CURRENT_USER_ID")) return true;
+        if (d.Contains("NOW")) return true;
+        return false;
+    }
+
+    bool ShouldHideOnCreate(CmsColumnMeta col)
+    {
+        if (col.IsPrimary) return true;
+        if (!col.IsEditable) return true;
+        if (IsSystemAutoDefault(col)) return true;
+
+        var t = (col.DataType ?? "").ToLowerInvariant();
+        if (t.Contains("timestamp") || t.Contains("rowversion")) return true;
 
         return false;
     }
 
-    bool IsBoolCol(CmsColumnMeta col)
+    // ===== Values & Errors =====
+    string? GetAttemptedValue(string fieldName)
     {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-        return t.StartsWith("bit");
-    }
-
-    string InputTypeFor(CmsColumnMeta col)
-    {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-
-        if (t.StartsWith("bigint") ||
-            t.StartsWith("int") ||
-            t.StartsWith("smallint") ||
-            t.StartsWith("tinyint") ||
-            t.StartsWith("decimal") ||
-            t.StartsWith("numeric"))
-            return "number";
-
-        if (t.StartsWith("datetime") || t.StartsWith("date"))
-            return "text"; // dễ nhập dd/MM/yyyy
-
-        return "text";
-    }
-
-    string? StepFor(CmsColumnMeta col)
-    {
-        var t = (col.DataType ?? string.Empty).ToLowerInvariant();
-        if (t.StartsWith("decimal") || t.StartsWith("numeric"))
-            return "0.01";
-
-        if (t.StartsWith("tinyint") || t.StartsWith("smallint") ||
-            t.StartsWith("int") || t.StartsWith("bigint"))
-            return "1";
-
-        return null;
-    }
-
-    bool IsRequired(CmsColumnMeta col)
-    {
-        // editable + NOT NULL + không có default_expr → bắt user nhập
-        return col.IsEditable && !col.IsNullable && string.IsNullOrWhiteSpace(col.DefaultExpr);
-    }
-
-    int? GetMaxLength(CmsColumnMeta col)
-    {
-        var dt = (col.DataType ?? string.Empty).ToLowerInvariant();
-
-        // parse nvarchar(50), varchar(200), char(10)...
-        int start = dt.IndexOf('(');
-        int end = dt.IndexOf(')');
-        if (start > 0 && end > start)
+        if (ViewData?.ModelState != null &&
+            ViewData.ModelState.TryGetValue(fieldName, out var entry) &&
+            entry != null)
         {
-            var inside = dt.Substring(start + 1, end - start - 1).Trim();
-            if (inside.Equals("max", StringComparison.OrdinalIgnoreCase))
-                return null;
+            if (!string.IsNullOrWhiteSpace(entry.AttemptedValue))
+                return entry.AttemptedValue;
 
-            if (int.TryParse(inside, out var len) && len > 0)
-                return len;
+            if (entry.RawValue != null)
+                return Convert.ToString(entry.RawValue, CultureInfo.InvariantCulture);
         }
         return null;
     }
+
+    string? GetFieldError(string fieldName)
+    {
+        if (ViewData?.ModelState != null &&
+            ViewData.ModelState.TryGetValue(fieldName, out var entry) &&
+            entry != null &&
+            entry.Errors != null &&
+            entry.Errors.Count > 0)
+            return entry.Errors[0].ErrorMessage;
+
+        return null;
+    }
+
+    bool HasFieldError(string fieldName) => !string.IsNullOrWhiteSpace(GetFieldError(fieldName));
+    string CssInvalidIfError(string name) => HasFieldError(name) ? " is-invalid" : "";
+
+    string? GetDefaultConst(string? defaultExpr)
+    {
+        if (string.IsNullOrWhiteSpace(defaultExpr)) return null;
+        var s = defaultExpr.Trim();
+        if (!s.StartsWith("CONST:", StringComparison.OrdinalIgnoreCase)) return null;
+        return s.Substring(6).Trim();
+    }
+
+    bool IsTruthy(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return false;
+        v = v.Trim().ToLowerInvariant();
+        return v == "1" || v == "true" || v == "on" || v == "yes";
+    }
+
+    bool IsWideField(CmsColumnMeta col) => IsTextArea(col) || IsImageCol(col);
 }
+
+@{
+    var lookups = ViewBag.Lookups as Dictionary<string, List<(string Value, string Text)>>;
+    var pk = Model.Columns.FirstOrDefault(c => c.IsPrimary);
+}
+
+<style>
+    .cms-form .form-control, .cms-form .form-select {
+        width: 100% !important;
+    }
+
+    .cms-form .cms-field {
+        padding: .5rem .85rem .85rem;
+        border: 1px solid rgba(0,0,0,.06);
+        border-radius: 1rem;
+        background: #fff;
+        box-shadow: 0 1px 0 rgba(0,0,0,.02);
+    }
+
+    .cms-form .cms-label {
+        font-weight: 650;
+    }
+
+    .cms-form .cms-help {
+        font-size: .825rem;
+        color: #6c757d;
+    }
+
+    .cms-form details > summary {
+        cursor: pointer;
+        user-select: none;
+        color: #6c757d;
+        font-size: .85rem;
+    }
+
+    /* ✅ mô tả to hơn, dễ gõ */
+    .cms-form textarea.form-control {
+        min-height: 220px;
+        resize: vertical;
+        line-height: 1.4;
+    }
+
+    /* counter */
+    .cms-counter {
+        font-size: .8rem;
+        color: #6c757d;
+    }
+
+        .cms-counter strong {
+            color: #111827;
+        }
+
+    /* image preview */
+    .cms-img-preview {
+        max-height: 180px;
+        display: none;
+        max-width: 100%;
+        object-fit: contain;
+        border-radius: .75rem;
+        border: 1px solid rgba(0,0,0,.08);
+        background: #fafafa;
+    }
+
+    /* small toolbar */
+    .cms-mini-actions .btn {
+        --bs-btn-padding-y: .25rem;
+        --bs-btn-padding-x: .5rem;
+        --bs-btn-font-size: .85rem;
+    }
+</style>
 
 <form asp-action="Create"
       asp-controller="Data"
       asp-route-tableId="@Model.Table.Id"
       method="post"
-      data-cms-ajax="true">
+      data-cms-ajax="true"
+      novalidate
+      class="cms-form"
+      data-cms-form="1">
 
     @Html.AntiForgeryToken()
 
-    @* PK readonly *@
-    @{
-        var pk = Model.Columns.FirstOrDefault(c => c.IsPrimary);
-        if (pk != null)
-        {
-            <div class="mb-3">
-                <label class="form-label">
-                    @((pk.DisplayName ?? pk.ColumnName) + " (PK)")
-                </label>
-                <input class="form-control" value="(auto)" readonly />
-            </div>
-        }
-    }
-
-    @* chỗ show lỗi server nếu có *@
     @if (!ViewData.ModelState.IsValid)
     {
-        <div class="alert alert-danger py-2">
+        <div class="alert alert-danger py-2 mb-3">
             Có lỗi khi lưu. Vui lòng kiểm tra lại các trường dữ liệu.
         </div>
     }
 
-    @foreach (var col in Model.Columns)
+    @if (pk != null)
     {
-        if (col.IsPrimary)
-            continue;
-
-        var label = col.DisplayName ?? col.ColumnName;
-        var name = col.ColumnName;
-        var required = IsRequired(col);
-        var maxLen = GetMaxLength(col);
-
-        if (!col.IsEditable)
-        {
-            <div class="mb-3">
-                <label class="form-label">@label (readonly)</label>
-                <input class="form-control"
-                       value="(auto / default)"
-                       readonly />
-                @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
-                {
-                    <div class="form-text">
-                        default_expr: <code>@col.DefaultExpr</code>
-                    </div>
-                }
+        <div class="mb-3 cms-field">
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="cms-label">@((pk.DisplayName ?? pk.ColumnName) + " (PK)")</div>
+                <span class="badge text-bg-light">Tự tăng</span>
             </div>
-
-            continue;
-        }
-
-        <div class="mb-3">
-            <label class="form-label">@label</label>
-
-            @if (IsTextArea(col))
-            {
-                <textarea name="@name"
-                  class="form-control"
-                  rows="3"
-                  @(required ? "required" : "")
-                  @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "")></textarea>
-            }
-            else if (IsBoolCol(col))
-            {
-                <div class="form-check form-switch">
-                    <input class="form-check-input"
-                           type="checkbox"
-                           id="field_@name"
-                           name="@name"
-                           value="1" />
-                    <label class="form-check-label" for="field_@name">
-                        Bật / tắt (@label)
-                    </label>
-                </div>
-            }
-            else if (IsImageCol(col))
-            {
-                <input name="@name"
-                       class="form-control"
-                       type="text"
-                       @(required ? "required" : "")
-                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
-                <small class="text-muted">
-                    Dán URL ảnh (CDN / UploadImages.aspx) vào đây.
-                </small>
-            }
-            else
-            {
-                var inputType = InputTypeFor(col);
-                var step = StepFor(col);
-
-                <input name="@name"
-                       class="form-control"
-                       type="@inputType"
-                       @(step != null ? $"step=\"{step}\"" : "")
-                       @(required ? "required" : "")
-                       @(maxLen.HasValue ? $"maxlength=\"{maxLen.Value}\"" : "") />
-            }
-
-            <div class="form-text">
-                <small>
-                    Kiểu: <code>@col.DataType</code>
-                    @if (!string.IsNullOrWhiteSpace(col.Format))
-                    {
-                        @: | Format: <code>@col.Format</code>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
-                    {
-                        @: | default_expr: <code>@col.DefaultExpr</code>
-                    }
-                </small>
-            </div>
+            <input class="form-control mt-2" value="(auto)" readonly />
         </div>
     }
 
-    <button type="submit" class="btn btn-primary">Lưu</button>
+    <div class="row g-3">
+        @foreach (var col in Model.Columns)
+        {
+            if (ShouldHideOnCreate(col)) { continue; }
+
+            var name = col.ColumnName ?? "";
+            if (string.IsNullOrWhiteSpace(name)) { continue; }
+
+            var label = col.DisplayName ?? name;
+            var required = IsRequired(col);
+            var maxLen = GetMaxLength(col);
+
+            var attempted = GetAttemptedValue(name);
+            var defaultConst = GetDefaultConst(col.DefaultExpr);
+            var value = attempted ?? defaultConst ?? "";
+
+            var err = GetFieldError(name);
+            var invalidClass = CssInvalidIfError(name);
+
+            var colClass = IsWideField(col) ? "col-12" : "col-12 col-lg-6";
+            var placeholder = IsDateTimeLike(col) ? "dd/MM/yyyy" : "";
+            var helpId = $"help_{name}";
+            var counterId = $"counter_{name}";
+
+            <div class="@colClass">
+                <div class="cms-field">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <label class="form-label cms-label mb-1" for="field_@name">
+                            @label
+                            @if (required)
+                            {
+                                <span class="text-danger">*</span>
+                            }
+                        </label>
+
+                        @if (maxLen.HasValue)
+                        {
+                            <div id="@counterId" class="cms-counter" aria-live="polite"></div>
+                        }
+                    </div>
+
+                    @* FK *@
+                    @if (IsFkCol(col) && lookups != null && lookups.TryGetValue(name, out var items) && items != null)
+                    {
+                        var searchId = $"search_{name}";
+                        <input id="@searchId" type="search" class="form-control mb-2"
+                               placeholder="Gõ để lọc danh sách..." autocomplete="off" />
+
+                        <select id="field_@name"
+                                name="@name"
+                                class="form-select@invalidClass"
+                                data-filter-input="@searchId"
+                                aria-describedby="@helpId"
+                                @BoolAttr("required", required)>
+
+                            <option value="" selected="@(string.IsNullOrWhiteSpace(value) ? "selected" : null)">-- Không có / Root --</option>
+
+                            @foreach (var it in items)
+                            {
+                                <option value="@it.Value" selected="@(value == it.Value ? "selected" : null)">@it.Text</option>
+                            }
+                        </select>
+
+                        <div id="@helpId" class="cms-help mt-2">Chọn từ danh sách (FK).</div>
+                    }
+                    @* ENUM *@
+                    else if (IsEnumCol(col))
+                    {
+                        var opts = ParseEnum(col.Format!);
+                        <select id="field_@name"
+                                name="@name"
+                                class="form-select@invalidClass"
+                                aria-describedby="@helpId"
+                                @BoolAttr("required", required)>
+                            @foreach (var o in opts)
+                            {
+                                <option value="@o.V" selected="@(value == o.V ? "selected" : null)">@o.T</option>
+                            }
+                        </select>
+                        <div id="@helpId" class="cms-help mt-2">Chọn từ danh sách (Enum).</div>
+                    }
+                    @* TEXTAREA *@
+                    else if (IsTextArea(col))
+                    {
+                        <textarea id="field_@name"
+                          name="@name"
+                          class="form-control@invalidClass"
+                          rows="10"
+                          data-autogrow="1"
+                          aria-describedby="@helpId"
+                          @BoolAttr("required", required)
+                          @IntAttr("maxlength", maxLen)>@value</textarea>
+
+                        <div id="@helpId" class="cms-help mt-2">Có thể nhập nội dung dài. Kéo góc dưới để phóng to thêm.</div>
+                    }
+                    @* BOOL *@
+                    else if (IsBoolCol(col))
+                    {
+                        var isChecked = IsTruthy(value);
+                        <input type="hidden" name="@name" value="0" />
+                        <div class="form-check form-switch mt-2">
+                            <input class="form-check-input@invalidClass"
+                                   type="checkbox"
+                                   id="field_@name"
+                                   name="@name"
+                                   value="1"
+                                   aria-describedby="@helpId"
+                                   @(isChecked ? "checked" : null) />
+                            <label class="form-check-label" for="field_@name">Bật / tắt</label>
+                        </div>
+                        <div id="@helpId" class="cms-help mt-2">Giá trị kiểu bit (0/1).</div>
+                    }
+                    @* IMAGE *@
+                    else if (IsImageCol(col))
+                    {
+                        var openId = $"open_{name}";
+                        var imgId = $"preview_{name}";
+                        var fileId = $"file_{name}";
+                        var statusId = $"upstatus_{name}";
+                        var clearId = $"clear_{name}";
+
+                        <div class="input-group">
+                            <input id="field_@name"
+                                   name="@name"
+                                   class="form-control@invalidClass"
+                                   type="text"
+                                   value="@value"
+                                   placeholder="Dán URL ảnh hoặc chọn file để upload..."
+                                   data-preview-img="@imgId"
+                                   data-open-link="@openId"
+                                   data-clear-btn="@clearId"
+                                   aria-describedby="@helpId"
+                                   @BoolAttr("required", required)
+                                   @IntAttr("maxlength", maxLen) />
+
+                            <a class="btn btn-outline-secondary disabled" id="@openId" href="javascript:void(0)"
+                               target="_blank" rel="noopener">Mở</a>
+
+                            <button class="btn btn-outline-danger" type="button" id="@clearId" title="Xoá giá trị">
+                                Xoá
+                            </button>
+                        </div>
+
+                        <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                            <input id="@fileId"
+                                   type="file"
+                                   class="form-control form-control-sm cms-img-file"
+                                   accept="image/*"
+                                   data-target-input="field_@name"
+                                   data-status-id="@statusId" />
+                            <span id="@statusId" class="small text-muted"></span>
+                        </div>
+
+                        <div class="mt-2">
+                            <img id="@imgId" class="cms-img-preview" alt="preview" />
+                        </div>
+
+                        <div id="@helpId" class="cms-help mt-2">Chọn ảnh để upload lên HAFood API hoặc dán URL.</div>
+                    }
+                    @* DEFAULT INPUT *@
+                    else
+                    {
+                        var inputType = InputTypeFor(col);
+                        var step = StepFor(col);
+                        var inputMode = IsNumeric(col) ? "decimal" : "text";
+
+                        <input id="field_@name"
+                               name="@name"
+                               class="form-control@invalidClass"
+                               type="@inputType"
+                               value="@value"
+                               placeholder="@placeholder"
+                               inputmode="@inputMode"
+                               aria-describedby="@helpId"
+                               @BoolAttr("required", required)
+                               @IntAttr("maxlength", maxLen)
+                               @StepAttr(step) />
+
+                        <div id="@helpId" class="cms-help mt-2">
+                            @if (IsDateTimeLike(col))
+                            {
+                                <text>Định dạng gợi ý: dd/MM/yyyy.</text>
+                            }
+                            else
+                            {
+
+                                <text>&nbsp;</text>
+                            }
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(err))
+                    {
+                        <div class="invalid-feedback d-block mt-2">@err</div>
+                    }
+
+                    <details class="mt-2">
+                        <summary>Thông tin kỹ thuật</summary>
+                        <div class="cms-help mt-2">
+                            Kiểu: <code>@col.DataType</code>
+                            @if (!string.IsNullOrWhiteSpace(col.Format))
+                            {
+                                <text> | Format: </text>
+                                <code>@col.Format</code>
+     }
+                            @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
+                            {
+                                <text> | default_expr: </text>
+                                <code>@col.DefaultExpr</code>
+     }
+                            @if (maxLen.HasValue)
+                            {
+                                <text> | max: </text>
+                                <code>@maxLen.Value</code>
+     }
+                        </div>
+                    </details>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+        <button type="submit" class="btn btn-primary px-4">Lưu</button>
+        <a class="btn btn-outline-secondary" href="@Url.Action("List", "Data", new { tableId = Model.Table.Id })">Quay lại</a>
+    </div>
 </form>
+
+<script>
+    (function () {
+      function cmsFormInit(root) {
+        root = root || document;
+
+        const $ = (sel) => root.querySelector(sel);
+        const $$ = (sel) => Array.from(root.querySelectorAll(sel));
+
+        // ===== maxlength counter =====
+        $$('[maxlength][id^="field_"]').forEach(inp => {
+          const max = parseInt(inp.getAttribute('maxlength') || '0', 10);
+          if (!max || max <= 0) return;
+
+          const name = inp.id.replace(/^field_/, '');
+          const counter = $(`#counter_${CSS.escape(name)}`);
+          if (!counter) return;
+
+          const update = () => {
+            const len = (inp.value || '').length;
+            counter.innerHTML = `<strong>${len}</strong>/${max}`;
+          };
+
+          inp.addEventListener('input', update);
+          update();
+        });
+
+        // ===== textarea autogrow (nhẹ, không giật) =====
+        $$('textarea[data-autogrow="1"]').forEach(ta => {
+          if (ta.dataset.agBound === "1") return;
+          ta.dataset.agBound = "1";
+
+          const resize = () => {
+            ta.style.height = 'auto';
+            ta.style.height = Math.min(ta.scrollHeight, 800) + 'px';
+          };
+
+          ta.addEventListener('input', resize);
+          setTimeout(resize, 0);
+        });
+
+        // ===== FK filter (rebuild, có debounce) =====
+        $$('select[data-filter-input]').forEach(sel => {
+          if (sel.dataset.fkBound === "1") return;
+          sel.dataset.fkBound = "1";
+
+          const inputId = sel.getAttribute('data-filter-input');
+          const inp = inputId ? $(`#${CSS.escape(inputId)}`) : null;
+          if (!inp) return;
+
+          const original = Array.from(sel.options).map(o => ({
+            value: o.value,
+            text: o.text,
+            isEmpty: o.value === ""
+          }));
+
+          let t = null;
+          function rebuild(q) {
+            const query = (q || "").trim().toLowerCase();
+            const selectedValue = sel.value;
+
+            sel.innerHTML = "";
+            const frag = document.createDocumentFragment();
+
+            const empty = original.find(x => x.isEmpty) || { value: "", text: "-- Không có / Root --", isEmpty: true };
+            const optEmpty = document.createElement("option");
+            optEmpty.value = empty.value;
+            optEmpty.text = empty.text;
+            frag.appendChild(optEmpty);
+
+            for (const it of original) {
+              if (it.isEmpty) continue;
+              if (!query || (it.text || "").toLowerCase().includes(query)) {
+                const opt = document.createElement("option");
+                opt.value = it.value;
+                opt.text = it.text;
+                frag.appendChild(opt);
+              }
+            }
+
+            sel.appendChild(frag);
+
+            if (selectedValue && Array.from(sel.options).some(o => o.value === selectedValue)) {
+              sel.value = selectedValue;
+            } else {
+              sel.value = "";
+            }
+          }
+
+          rebuild(inp.value);
+          inp.addEventListener("input", () => {
+            if (t) clearTimeout(t);
+            t = setTimeout(() => rebuild(inp.value), 120);
+          });
+        });
+
+        // ===== Image preview + open + clear =====
+        function isProbablyUrl(v) {
+          return /^https?:\/\/|^data:image\//i.test(v);
+        }
+
+        $$('input[data-preview-img][data-open-link]').forEach(inp => {
+          if (inp.dataset.imgBound === "1") return;
+          inp.dataset.imgBound = "1";
+
+          const imgId = inp.getAttribute('data-preview-img');
+          const openId = inp.getAttribute('data-open-link');
+          const clearId = inp.getAttribute('data-clear-btn');
+
+          const img = imgId ? $(`#${CSS.escape(imgId)}`) : null;
+          const a = openId ? $(`#${CSS.escape(openId)}`) : null;
+          const btnClear = clearId ? $(`#${CSS.escape(clearId)}`) : null;
+
+          function sync() {
+            const v = (inp.value || '').trim();
+            if (!img || !a) return;
+
+            if (!v || !isProbablyUrl(v)) {
+              img.style.display = 'none';
+              img.src = '';
+              a.href = 'javascript:void(0)';
+              a.classList.add('disabled');
+              return;
+            }
+
+            img.style.display = 'block';
+            img.src = v;
+            a.href = v;
+            a.classList.remove('disabled');
+          }
+
+          if (btnClear) {
+            btnClear.addEventListener('click', () => {
+              inp.value = '';
+              inp.dispatchEvent(new Event("input", { bubbles: true }));
+            });
+          }
+
+          inp.addEventListener('input', sync);
+          sync();
+        });
+
+        // ===== Upload ảnh lên HAFood API =====
+        async function uploadToApi(file) {
+          const api = (window.__HAFOOD_API || '').replace(/\/+$/, '');
+          if (!api) throw new Error("Chưa cấu hình __HAFOOD_API (HAFoodApiBaseUrl)");
+
+          const fd = new FormData();
+          fd.append("files", file);
+
+          const headers = {};
+          const key = (window.__HAFOOD_API_KEY || '').trim();
+          if (key) headers["X-Api-Key"] = key;
+
+          const res = await fetch(api + "/files/images?size_w=1400&size_t=900&size_p=500", {
+            method: "POST",
+            body: fd,
+            headers
+          });
+
+          const json = await res.json().catch(() => null);
+          if (!res.ok || !json) {
+            throw new Error(json?.msg || json?.message || "Upload lỗi");
+          }
+
+          const url = json?.data?.urlWeb || json?.data?.urlPhone || "";
+          if (!url) throw new Error("API không trả url");
+          return url;
+        }
+
+        $$('input.cms-img-file[data-target-input]').forEach(fileInp => {
+          if (fileInp.dataset.upBound === "1") return;
+          fileInp.dataset.upBound = "1";
+
+          const targetId = fileInp.getAttribute("data-target-input");
+          const statusId = fileInp.getAttribute("data-status-id");
+          const target = targetId ? $(`#${CSS.escape(targetId)}`) : null;
+          const statusEl = statusId ? $(`#${CSS.escape(statusId)}`) : null;
+
+          fileInp.addEventListener("change", async () => {
+            const file = fileInp.files && fileInp.files[0];
+            if (!file) return;
+
+            if (!file.type || !file.type.startsWith("image/")) {
+              alert("File không phải ảnh.");
+              fileInp.value = "";
+              return;
+            }
+
+            // preview tức thì (blob) cho cảm giác nhanh
+            let blobUrl = null;
+            try {
+              blobUrl = URL.createObjectURL(file);
+              if (target) {
+                target.value = blobUrl;
+                target.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+            } catch {}
+
+            if (statusEl) statusEl.textContent = "Đang upload...";
+
+            try {
+              const url = await uploadToApi(file);
+              if (target) {
+                target.value = url;
+                target.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+              if (statusEl) statusEl.textContent = "✅ Upload xong";
+            } catch (e) {
+              console.error(e);
+              if (statusEl) statusEl.textContent = "❌ " + (e?.message || "Upload lỗi");
+              alert(e?.message || "Upload lỗi");
+            } finally {
+              if (blobUrl) {
+                try { URL.revokeObjectURL(blobUrl); } catch {}
+              }
+              fileInp.value = "";
+            }
+          });
+        });
+      }
+
+      // expose
+      window.cmsCreateFormInit = cmsFormInit;
+
+      // auto-init cho trang thường
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => cmsFormInit(document));
+      } else {
+        cmsFormInit(document);
+      }
+    })();
+</script>
