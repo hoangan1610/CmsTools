@@ -84,6 +84,7 @@
 
         return key; // fallback: vẫn hiện id nếu không tìm thấy
     }
+
     IHtmlContent Opt(string value, string text, string current)
     {
         var opt = new TagBuilder("option");
@@ -210,669 +211,691 @@
     }
 }
 
-<div class="cmstools-page-header">
-    <div>
-        <h2 class="cmstools-page-title">@title</h2>
-        <div class="cmstools-page-subtitle">
-            <span>Table: <strong>@Model.Table.FullName</strong></span>
-            <span class="ms-3">Total rows: <strong>@Model.Total</strong></span>
+<!-- ✅ WRAP TO ENABLE AJAX REFRESH LIST -->
+<div id="cmsListRoot" data-cms-list-root="1">
 
-            @if (isReviewTable)
-            {
-                <span class="ms-3">
-                    <span class="badge bg-warning text-dark">
-                        Chờ duyệt (trên trang này): @pendingCount
+    <div class="cmstools-page-header">
+        <div>
+            <h2 class="cmstools-page-title">@title</h2>
+            <div class="cmstools-page-subtitle">
+                <span>Table: <strong>@Model.Table.FullName</strong></span>
+                <span class="ms-3">Total rows: <strong>@Model.Total</strong></span>
+
+                @if (isReviewTable)
+                {
+                    <span class="ms-3">
+                        <span class="badge bg-warning text-dark">
+                            Chờ duyệt (trên trang này): @pendingCount
+                        </span>
                     </span>
-                </span>
+                }
+            </div>
+        </div>
+
+        <div class="cmstools-page-actions">
+            @if (Model.Permission?.CanCreate == true)
+            {
+                <button type="button"
+                        class="btn btn-success btn-sm me-2"
+                        data-cms-modal="form"
+                        data-title="Thêm bản ghi - @(Model.Table.DisplayName ?? Model.Table.TableName)"
+                        data-url="@Url.Action("CreateForm", "Data", new { tableId = Model.Table.Id })">
+                    Thêm bản ghi mới
+                </button>
             }
+
+            <a class="btn btn-outline-secondary btn-sm"
+               href="@($"{Url.Action("ExportCsv", "Data")}{Context.Request.QueryString}")">
+                Xuất CSV
+            </a>
         </div>
     </div>
 
-    <div class="cmstools-page-actions">
-        @if (Model.Permission?.CanCreate == true)
-        {
-            <button type="button"
-                    class="btn btn-success btn-sm me-2"
-                    data-cms-modal="form"
-                    data-title="Thêm bản ghi - @(Model.Table.DisplayName ?? Model.Table.TableName)"
-                    data-url="@Url.Action("CreateForm", "Data", new { tableId = Model.Table.Id })">
-                Thêm bản ghi mới
-            </button>
-        }
+    @if (Model.FilterColumns != null && Model.FilterColumns.Count > 0)
+    {
+        var basicFilters = Model.FilterColumns.Take(4).ToList();
+        var advFilters = Model.FilterColumns.Skip(4).ToList();
 
-        <a class="btn btn-outline-secondary btn-sm"
-           href="@($"{Url.Action("ExportCsv", "Data")}{Context.Request.QueryString}")">
-            Xuất CSV
-        </a>
-    </div>
-</div>
+        <div class="card cmstools-filter-card mb-3">
+            <div class="card-body py-2">
+                <form method="get" class="cmstools-filter-form">
+                    <input type="hidden" name="tableId" value="@Model.Table.Id" />
+                    <input type="hidden" name="page" value="1" />
+                    <input type="hidden" name="pageSize" value="@Model.PageSize" />
 
-@if (Model.FilterColumns != null && Model.FilterColumns.Count > 0)
-{
-    var basicFilters = Model.FilterColumns.Take(4).ToList();
-    var advFilters = Model.FilterColumns.Skip(4).ToList();
+                    <div class="row g-2 align-items-end cmstools-filter-row">
+                        @foreach (var col in basicFilters)
+                        {
+                            var name = col.ColumnName;
+                            var label = col.DisplayName ?? col.ColumnName;
+                            Model.Filters.TryGetValue(name, out var currentValueObj);
+                            var currentValue = currentValueObj?.ToString() ?? string.Empty;
 
-    <div class="card cmstools-filter-card mb-3">
-        <div class="card-body py-2">
-            <form method="get" class="cmstools-filter-form">
-                <input type="hidden" name="tableId" value="@Model.Table.Id" />
-                <input type="hidden" name="page" value="1" />
-                <input type="hidden" name="pageSize" value="@Model.PageSize" />
+                            var fmtRaw = col.Format ?? string.Empty;
+                            var fmt = fmtRaw.ToLowerInvariant();
+                            var colNameLower = (col.ColumnName ?? string.Empty).ToLowerInvariant();
+                            var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
 
-                <div class="row g-2 align-items-end cmstools-filter-row">
-                    @foreach (var col in basicFilters)
-                    {
-                        var name = col.ColumnName;
-                        var label = col.DisplayName ?? col.ColumnName;
-                        Model.Filters.TryGetValue(name, out var currentValueObj);
-                        var currentValue = currentValueObj?.ToString() ?? string.Empty;
+                            bool isRangeCol = fmt.StartsWith("range:");
 
-                        var fmtRaw = col.Format ?? string.Empty;
-                        var fmt = fmtRaw.ToLowerInvariant();
-                        var colNameLower = (col.ColumnName ?? string.Empty).ToLowerInvariant();
-                        var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+                            bool isDateCol =
+                            (!string.IsNullOrEmpty(dataType) && dataType.Contains("date"))
+                            || fmt == "date"
+                            || fmt == "datetime"
+                            || fmt == "datetime2"
+                            || colNameLower.EndsWith("_date")
+                            || colNameLower.EndsWith("_at");
 
-                        bool isRangeCol = fmt.StartsWith("range:");
+                            bool isStatusCol = string.Equals(col.ColumnName, "status", StringComparison.OrdinalIgnoreCase);
 
-                        bool isDateCol =
-                        (!string.IsNullOrEmpty(dataType) && dataType.Contains("date"))
-                        || fmt == "date"
-                        || fmt == "datetime"
-                        || fmt == "datetime2"
-                        || colNameLower.EndsWith("_date")
-                        || colNameLower.EndsWith("_at");
+                            bool isBoolCol =
+                            dataType == "bit"
+                            || fmt == "bool"
+                            || colNameLower.StartsWith("is_")
+                            || colNameLower.StartsWith("has_");
 
-                        bool isStatusCol = string.Equals(col.ColumnName, "status", StringComparison.OrdinalIgnoreCase);
+                            bool isEnumCol = fmt.StartsWith("enum:");
 
-                        bool isBoolCol =
-                        dataType == "bit"
-                        || fmt == "bool"
-                        || colNameLower.StartsWith("is_")
-                        || colNameLower.StartsWith("has_");
+                            bool isNumericCol =
+                            dataType == "int"
+                            || dataType == "bigint"
+                            || dataType == "smallint"
+                            || dataType == "tinyint"
+                            || dataType == "decimal"
+                            || dataType == "numeric"
+                            || dataType == "float"
+                            || dataType == "real"
+                            || dataType == "money"
+                            || fmt == "number";
 
-                        bool isEnumCol = fmt.StartsWith("enum:");
+                            <div class="col-12 col-md-6 col-xl-3">
+                                <label class="form-label small mb-1">@label</label>
 
-                        bool isNumericCol =
-                        dataType == "int"
-                        || dataType == "bigint"
-                        || dataType == "smallint"
-                        || dataType == "tinyint"
-                        || dataType == "decimal"
-                        || dataType == "numeric"
-                        || dataType == "float"
-                        || dataType == "real"
-                        || dataType == "money"
-                        || fmt == "number";
-
-                        <div class="col-12 col-md-6 col-xl-3">
-                            <label class="form-label small mb-1">@label</label>
-
-                            @if (isRangeCol)
-                            {
-                                var parts = fmt.Split(':', 2);
-                                var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim();
-
-                                bool isDateRange =
-                                rangeKind == "date"
-                                || rangeKind == "datetime"
-                                || rangeKind == "datetime2";
-
-                                var fromKey = isDateRange ? $"{name}_from" : $"{name}_min";
-                                var toKey = isDateRange ? $"{name}_to" : $"{name}_max";
-
-                                Model.Filters.TryGetValue(fromKey, out var fromObj);
-                                Model.Filters.TryGetValue(toKey, out var toObj);
-                                var fromVal = fromObj?.ToString() ?? string.Empty;
-                                var toVal = toObj?.ToString() ?? string.Empty;
-
-                                var inputType = isDateRange ? "date" : "number";
-
-                                <div class="input-group input-group-sm">
-                                    <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
-                                    <span class="input-group-text">–</span>
-                                    <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
-                                </div>
-                            }
-                            else if (isStatusCol)
-                            {
-                                <select name="@name" class="form-select form-select-sm">
-                                    @Opt("", "-- Tất cả --", currentValue)
-
-                                    @if (isReviewTable)
-                                    {
-                                        @Opt("0", "Chờ duyệt", currentValue)
-                                        @Opt("1", "Đã duyệt", currentValue)
-                                        @Opt("2", "Đã từ chối", currentValue)
-                                    }
-                                    else
-                                    {
-                                        @Opt("1", "Active", currentValue)
-                                        @Opt("0", "Inactive", currentValue)
-                                    }
-                                </select>
-                            }
-                            else if (isDateCol)
-                            {
-                                <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
-                            }
-                            else if (isBoolCol)
-                            {
-                                <select name="@name" class="form-select form-select-sm">
-                                    @Opt("", "-- Tất cả --", currentValue)
-                                    @Opt("1", "Có", currentValue)
-                                    @Opt("0", "Không", currentValue)
-                                </select>
-                            }
-                            else if (isEnumCol)
-                            {
-                                var rawEnum = fmtRaw.Substring("enum:".Length);
-                                var options = new List<(string Value, string Text)>();
-
-                                foreach (var part in rawEnum.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                                @if (isRangeCol)
                                 {
-                                    var kv = part.Split('=', 2);
-                                    var val = kv[0].Trim();
-                                    var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
-                                    if (!string.IsNullOrEmpty(val)) options.Add((val, text));
-                                }
+                                    var parts = fmt.Split(':', 2);
+                                    var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim();
 
-                                <select name="@name" class="form-select form-select-sm">
-                                    @Opt("", "-- Tất cả --", currentValue)
-                                    @foreach (var opt in options)
+                                    bool isDateRange =
+                                    rangeKind == "date"
+                                    || rangeKind == "datetime"
+                                    || rangeKind == "datetime2";
+
+                                    var fromKey = isDateRange ? $"{name}_from" : $"{name}_min";
+                                    var toKey = isDateRange ? $"{name}_to" : $"{name}_max";
+
+                                    Model.Filters.TryGetValue(fromKey, out var fromObj);
+                                    Model.Filters.TryGetValue(toKey, out var toObj);
+                                    var fromVal = fromObj?.ToString() ?? string.Empty;
+                                    var toVal = toObj?.ToString() ?? string.Empty;
+
+                                    var inputType = isDateRange ? "date" : "number";
+
+                                    <div class="input-group input-group-sm">
+                                        <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
+                                        <span class="input-group-text">–</span>
+                                        <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
+                                    </div>
+                                }
+                                else if (isStatusCol)
+                                {
+                                    <select name="@name" class="form-select form-select-sm">
+                                        @Opt("", "-- Tất cả --", currentValue)
+
+                                        @if (isReviewTable)
+                                        {
+                                            @Opt("0", "Chờ duyệt", currentValue)
+                                            @Opt("1", "Đã duyệt", currentValue)
+                                            @Opt("2", "Đã từ chối", currentValue)
+                                        }
+                                        else
+                                        {
+                                            @Opt("1", "Active", currentValue)
+                                            @Opt("0", "Inactive", currentValue)
+                                        }
+                                    </select>
+                                }
+                                else if (isDateCol)
+                                {
+                                    <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
+                                }
+                                else if (isBoolCol)
+                                {
+                                    <select name="@name" class="form-select form-select-sm">
+                                        @Opt("", "-- Tất cả --", currentValue)
+                                        @Opt("1", "Có", currentValue)
+                                        @Opt("0", "Không", currentValue)
+                                    </select>
+                                }
+                                else if (isEnumCol)
+                                {
+                                    var rawEnum = fmtRaw.Substring("enum:".Length);
+                                    var options = new List<(string Value, string Text)>();
+
+                                    foreach (var part in rawEnum.Split(';', StringSplitOptions.RemoveEmptyEntries))
                                     {
-                                        @Opt(opt.Value, opt.Text, currentValue)
+                                        var kv = part.Split('=', 2);
+                                        var val = kv[0].Trim();
+                                        var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
+                                        if (!string.IsNullOrEmpty(val)) options.Add((val, text));
                                     }
-                                </select>
-                            }
-                            else if (isNumericCol)
+
+                                    <select name="@name" class="form-select form-select-sm">
+                                        @Opt("", "-- Tất cả --", currentValue)
+                                        @foreach (var opt in options)
+                                        {
+                                            @Opt(opt.Value, opt.Text, currentValue)
+                                        }
+                                    </select>
+                                }
+                                else if (IsFkColumn(col) && lookupsRaw != null && lookupsRaw.TryGetValue(name, out var fkOpts) && fkOpts != null && fkOpts.Count > 0)
+                                {
+                                    <select name="@name" class="form-select form-select-sm">
+                                        @Opt("", "-- Tất cả --", currentValue)
+                                        @foreach (var opt in fkOpts)
+                                        {
+                                            @Opt(opt.Value, opt.Text, currentValue)
+                                        }
+                                    </select>
+                                }
+                                else if (isNumericCol)
+                                {
+                                    <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
+                                }
+                                else
+                                {
+                                    <input name="@name" class="form-control form-control-sm" value="@currentValue" />
+                                }
+                            </div>
+                        }
+
+                        @if (isReviewTable)
+                        {
+                            <div class="col-12 col-md-4 col-xl-3">
+                                <div class="form-check mt-3">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           id="filterOnlyPending"
+                                           value="1"
+                                           @(onlyPendingChecked ? "checked" : null) />
+                                    <label class="form-check-label small" for="filterOnlyPending">
+                                        Chỉ hiện đánh giá chưa duyệt
+                                    </label>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="col-12 col-md-auto ms-md-auto text-md-end mt-2 mt-md-0">
+                            <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
+                            <a class="btn btn-outline-secondary btn-sm me-2" href="/Data/List?tableId=@Model.Table.Id">Xoá lọc</a>
+
+                            @if (advFilters.Any())
                             {
-                                <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
-                            }
-                            else
-                            {
-                                <input name="@name" class="form-control form-control-sm" value="@currentValue" />
+                                <button class="btn btn-link btn-sm cmstools-filter-adv-toggle"
+                                        type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#cmstoolsAdvancedFilters"
+                                        aria-expanded="false"
+                                        aria-controls="cmstoolsAdvancedFilters">
+                                    Nâng cao
+                                </button>
                             }
                         </div>
-                    }
+                    </div>
 
-                    @if (isReviewTable)
+                    @if (advFilters.Any())
                     {
-                        <div class="col-12 col-md-4 col-xl-3">
-                            <div class="form-check mt-3">
-                                <input class="form-check-input"
-                                       type="checkbox"
-                                       id="filterOnlyPending"
-                                       value="1"
-                                       @(onlyPendingChecked ? "checked" : null) />
-                                <label class="form-check-label small" for="filterOnlyPending">
-                                    Chỉ hiện đánh giá chưa duyệt
-                                </label>
+                        <div class="collapse mt-2" id="cmstoolsAdvancedFilters">
+                            <div class="border-top pt-2 mt-1"></div>
+                            <div class="row g-2 cmstools-filter-advanced">
+                                @foreach (var col in advFilters)
+                                {
+                                    var name = col.ColumnName;
+                                    var label = col.DisplayName ?? col.ColumnName;
+                                    Model.Filters.TryGetValue(name, out var currentValueObj);
+                                    var currentValue = currentValueObj?.ToString() ?? string.Empty;
+
+                                    var fmtRaw = col.Format ?? string.Empty;
+                                    var fmt = fmtRaw.ToLowerInvariant();
+                                    var colNameLower = (col.ColumnName ?? string.Empty).ToLowerInvariant();
+                                    var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
+
+                                    bool isRangeCol = fmt.StartsWith("range:");
+
+                                    bool isDateCol =
+                                    (!string.IsNullOrEmpty(dataType) && dataType.Contains("date"))
+                                    || fmt == "date"
+                                    || fmt == "datetime"
+                                    || fmt == "datetime2"
+                                    || colNameLower.EndsWith("_date")
+                                    || colNameLower.EndsWith("_at");
+
+                                    bool isStatusCol = string.Equals(col.ColumnName, "status", StringComparison.OrdinalIgnoreCase);
+
+                                    bool isBoolCol =
+                                    dataType == "bit"
+                                    || fmt == "bool"
+                                    || colNameLower.StartsWith("is_")
+                                    || colNameLower.StartsWith("has_");
+
+                                    bool isEnumCol = fmt.StartsWith("enum:");
+
+                                    bool isNumericCol =
+                                    dataType == "int"
+                                    || dataType == "bigint"
+                                    || dataType == "smallint"
+                                    || dataType == "tinyint"
+                                    || dataType == "decimal"
+                                    || dataType == "numeric"
+                                    || dataType == "float"
+                                    || dataType == "real"
+                                    || dataType == "money"
+                                    || fmt == "number";
+
+                                    <div class="col-12 col-md-6 col-xl-3">
+                                        <label class="form-label small mb-1">@label</label>
+
+                                        @if (isRangeCol)
+                                        {
+                                            var parts = fmt.Split(':', 2);
+                                            var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim();
+
+                                            bool isDateRange =
+                                            rangeKind == "date"
+                                            || rangeKind == "datetime"
+                                            || rangeKind == "datetime2";
+
+                                            var fromKey = isDateRange ? $"{name}_from" : $"{name}_min";
+                                            var toKey = isDateRange ? $"{name}_to" : $"{name}_max";
+
+                                            Model.Filters.TryGetValue(fromKey, out var fromObj);
+                                            Model.Filters.TryGetValue(toKey, out var toObj);
+                                            var fromVal = fromObj?.ToString() ?? string.Empty;
+                                            var toVal = toObj?.ToString() ?? string.Empty;
+
+                                            var inputType = isDateRange ? "date" : "number";
+
+                                            <div class="input-group input-group-sm">
+                                                <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
+                                                <span class="input-group-text">–</span>
+                                                <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
+                                            </div>
+                                        }
+                                        else if (isStatusCol)
+                                        {
+                                            <select name="@name" class="form-select form-select-sm">
+                                                @Opt("", "-- Tất cả --", currentValue)
+
+                                                @if (isReviewTable)
+                                                {
+                                                    @Opt("0", "Chờ duyệt", currentValue)
+                                                    @Opt("1", "Đã duyệt", currentValue)
+                                                    @Opt("2", "Đã từ chối", currentValue)
+                                                }
+                                                else
+                                                {
+                                                    @Opt("1", "Active", currentValue)
+                                                    @Opt("0", "Inactive", currentValue)
+                                                }
+                                            </select>
+                                        }
+                                        else if (isDateCol)
+                                        {
+                                            <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
+                                        }
+                                        else if (isBoolCol)
+                                        {
+                                            <select name="@name" class="form-select form-select-sm">
+                                                @Opt("", "-- Tất cả --", currentValue)
+                                                @Opt("1", "Có", currentValue)
+                                                @Opt("0", "Không", currentValue)
+                                            </select>
+                                        }
+                                        else if (isEnumCol)
+                                        {
+                                            var rawEnum = fmtRaw.Substring("enum:".Length);
+                                            var options = new List<(string Value, string Text)>();
+
+                                            foreach (var part in rawEnum.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                                            {
+                                                var kv = part.Split('=', 2);
+                                                var val = kv[0].Trim();
+                                                var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
+                                                if (!string.IsNullOrEmpty(val)) options.Add((val, text));
+                                            }
+
+                                            <select name="@name" class="form-select form-select-sm">
+                                                @Opt("", "-- Tất cả --", currentValue)
+                                                @foreach (var opt in options)
+                                                {
+                                                    @Opt(opt.Value, opt.Text, currentValue)
+                                                }
+                                            </select>
+                                        }
+                                        else if (IsFkColumn(col) && lookupsRaw != null && lookupsRaw.TryGetValue(name, out var fkOpts) && fkOpts != null && fkOpts.Count > 0)
+                                        {
+                                            <select name="@name" class="form-select form-select-sm">
+                                                @Opt("", "-- Tất cả --", currentValue)
+                                                @foreach (var opt in fkOpts)
+                                                {
+                                                    @Opt(opt.Value, opt.Text, currentValue)
+                                                }
+                                            </select>
+                                        }
+                                        else if (isNumericCol)
+                                        {
+                                            <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
+                                        }
+                                        else
+                                        {
+                                            <input name="@name" class="form-control form-control-sm" value="@currentValue" />
+                                        }
+                                    </div>
+                                }
                             </div>
                         </div>
                     }
-
-                    <div class="col-12 col-md-auto ms-md-auto text-md-end mt-2 mt-md-0">
-                        <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
-                        <a class="btn btn-outline-secondary btn-sm me-2" href="/Data/List?tableId=@Model.Table.Id">Xoá lọc</a>
-
-                        @if (advFilters.Any())
-                        {
-                            <button class="btn btn-link btn-sm cmstools-filter-adv-toggle"
-                                    type="button"
-                                    data-bs-toggle="collapse"
-                                    data-bs-target="#cmstoolsAdvancedFilters"
-                                    aria-expanded="false"
-                                    aria-controls="cmstoolsAdvancedFilters">
-                                Nâng cao
-                            </button>
-                        }
-                    </div>
-                </div>
-
-                @if (advFilters.Any())
-                {
-                    <div class="collapse mt-2" id="cmstoolsAdvancedFilters">
-                        <div class="border-top pt-2 mt-1"></div>
-                        <div class="row g-2 cmstools-filter-advanced">
-                            @* giữ nguyên phần advanced của bạn *@
-                            @foreach (var col in advFilters)
-                            {
-                                var name = col.ColumnName;
-                                var label = col.DisplayName ?? col.ColumnName;
-                                Model.Filters.TryGetValue(name, out var currentValueObj);
-                                var currentValue = currentValueObj?.ToString() ?? string.Empty;
-
-                                var fmtRaw = col.Format ?? string.Empty;
-                                var fmt = fmtRaw.ToLowerInvariant();
-                                var colNameLower = (col.ColumnName ?? string.Empty).ToLowerInvariant();
-                                var dataType = (col.DataType ?? string.Empty).ToLowerInvariant();
-
-                                bool isRangeCol = fmt.StartsWith("range:");
-
-                                bool isDateCol =
-                                (!string.IsNullOrEmpty(dataType) && dataType.Contains("date"))
-                                || fmt == "date"
-                                || fmt == "datetime"
-                                || fmt == "datetime2"
-                                || colNameLower.EndsWith("_date")
-                                || colNameLower.EndsWith("_at");
-
-                                bool isStatusCol = string.Equals(col.ColumnName, "status", StringComparison.OrdinalIgnoreCase);
-
-                                bool isBoolCol =
-                                dataType == "bit"
-                                || fmt == "bool"
-                                || colNameLower.StartsWith("is_")
-                                || colNameLower.StartsWith("has_");
-
-                                bool isEnumCol = fmt.StartsWith("enum:");
-
-                                bool isNumericCol =
-                                dataType == "int"
-                                || dataType == "bigint"
-                                || dataType == "smallint"
-                                || dataType == "tinyint"
-                                || dataType == "decimal"
-                                || dataType == "numeric"
-                                || dataType == "float"
-                                || dataType == "real"
-                                || dataType == "money"
-                                || fmt == "number";
-
-                                <div class="col-12 col-md-6 col-xl-3">
-                                    <label class="form-label small mb-1">@label</label>
-
-                                    @if (isRangeCol)
-                                    {
-                                        var parts = fmt.Split(':', 2);
-                                        var rangeKind = (parts.Length > 1 ? parts[1] : "number").Trim();
-
-                                        bool isDateRange =
-                                        rangeKind == "date"
-                                        || rangeKind == "datetime"
-                                        || rangeKind == "datetime2";
-
-                                        var fromKey = isDateRange ? $"{name}_from" : $"{name}_min";
-                                        var toKey = isDateRange ? $"{name}_to" : $"{name}_max";
-
-                                        Model.Filters.TryGetValue(fromKey, out var fromObj);
-                                        Model.Filters.TryGetValue(toKey, out var toObj);
-                                        var fromVal = fromObj?.ToString() ?? string.Empty;
-                                        var toVal = toObj?.ToString() ?? string.Empty;
-
-                                        var inputType = isDateRange ? "date" : "number";
-
-                                        <div class="input-group input-group-sm">
-                                            <input name="@fromKey" type="@inputType" class="form-control" value="@fromVal" placeholder="Từ" />
-                                            <span class="input-group-text">–</span>
-                                            <input name="@toKey" type="@inputType" class="form-control" value="@toVal" placeholder="Đến" />
-                                        </div>
-                                    }
-                                    else if (isStatusCol)
-                                    {
-                                        <select name="@name" class="form-select form-select-sm">
-                                            @Opt("", "-- Tất cả --", currentValue)
-
-                                            @if (isReviewTable)
-                                            {
-                                                @Opt("0", "Chờ duyệt", currentValue)
-                                                @Opt("1", "Đã duyệt", currentValue)
-                                                @Opt("2", "Đã từ chối", currentValue)
-                                            }
-                                            else
-                                            {
-                                                @Opt("1", "Active", currentValue)
-                                                @Opt("0", "Inactive", currentValue)
-                                            }
-                                        </select>
-                                    }
-                                    else if (isDateCol)
-                                    {
-                                        <input name="@name" type="date" class="form-control form-control-sm" value="@currentValue" />
-                                    }
-                                    else if (isBoolCol)
-                                    {
-                                        <select name="@name" class="form-select form-select-sm">
-                                            @Opt("", "-- Tất cả --", currentValue)
-                                            @Opt("1", "Có", currentValue)
-                                            @Opt("0", "Không", currentValue)
-                                        </select>
-                                    }
-                                    else if (isEnumCol)
-                                    {
-                                        var rawEnum = fmtRaw.Substring("enum:".Length);
-                                        var options = new List<(string Value, string Text)>();
-
-                                        foreach (var part in rawEnum.Split(';', StringSplitOptions.RemoveEmptyEntries))
-                                        {
-                                            var kv = part.Split('=', 2);
-                                            var val = kv[0].Trim();
-                                            var text = kv.Length > 1 && !string.IsNullOrEmpty(kv[1]) ? kv[1].Trim() : val;
-                                            if (!string.IsNullOrEmpty(val)) options.Add((val, text));
-                                        }
-
-                                        <select name="@name" class="form-select form-select-sm">
-                                            @Opt("", "-- Tất cả --", currentValue)
-                                            @foreach (var opt in options)
-                                            {
-                                                @Opt(opt.Value, opt.Text, currentValue)
-                                            }
-                                        </select>
-                                    }
-                                    else if (isNumericCol)
-                                    {
-                                        <input name="@name" type="number" class="form-control form-control-sm" value="@currentValue" />
-                                    }
-                                    else
-                                    {
-                                        <input name="@name" class="form-control form-control-sm" value="@currentValue" />
-                                    }
-                                </div>
-                            }
-                        </div>
-                    </div>
-                }
-            </form>
+                </form>
+            </div>
         </div>
-    </div>
-}
+    }
 
-@if (Model.Rows == null || !Model.Rows.Any())
-{
-    <p class="text-muted">Không có dữ liệu.</p>
-}
-else
-{
-    <div class="cmstools-table-container">
-        <div class="cmstools-table-scroll">
-            <table class="table table-striped table-sm table-bordered cmstools-table mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th class="cmstools-th cmstools-th-actions text-nowrap">Thao tác</th>
-
-                        @if (idCol != null)
-                        {
-                            <th class="cmstools-th text-nowrap" style="width:80px;">
-                                @(idCol.DisplayName ?? idCol.ColumnName)
-                            </th>
-                        }
-
-                        @foreach (var c in otherCols)
-                        {
-                            var thStyle = BuildThStyle(c);
-                            <th class="cmstools-th text-nowrap" style="@thStyle">
-                                @(c.DisplayName ?? c.ColumnName)
-                            </th>
-                        }
-                    </tr>
-                </thead>
-
-                <tbody>
-                    @foreach (System.Collections.Generic.IDictionary<string, object?> row in Model.Rows)
-                    {
-                        object? idValue = null;
-                        if (row != null && row.ContainsKey("id")) idValue = row["id"];
-
-                        byte reviewStatus = 0;
-                        if (row != null && row.ContainsKey("status"))
-                            byte.TryParse(row["status"]?.ToString(), out reviewStatus);
-
-                        bool isHidden = false;
-                        if (row != null && row.ContainsKey("is_hidden"))
-                            bool.TryParse(row["is_hidden"]?.ToString(), out isHidden);
-
+    @if (Model.Rows == null || !Model.Rows.Any())
+    {
+        <p class="text-muted">Không có dữ liệu.</p>
+    }
+    else
+    {
+        <div class="cmstools-table-container">
+            <div class="cmstools-table-scroll">
+                <table class="table table-striped table-sm table-bordered cmstools-table mb-0">
+                    <thead class="table-light">
                         <tr>
-                            <td class="cmstools-td cmstools-td-actions">
-                                @if (idValue != null)
-                                {
-                                    <div class="cmstools-actions-group d-flex flex-wrap">
-                                        @if (Model.Permission?.CanUpdate == true)
-                                        {
-                                            <button type="button"
-                                                    class="btn btn-primary btn-sm cmstools-action-btn"
-                                                    data-cms-modal="form"
-                                                    data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                    data-url="@Url.Action("EditForm", "Data", new { tableId = Model.Table.Id, id = idValue })">
-                                                Sửa
-                                            </button>
-                                        }
-                                        else if (Model.Permission?.CanView == true && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
-                                        {
-                                            <a class="btn btn-outline-secondary btn-sm cmstools-action-btn"
-                                               href="/Data/Details?tableId=@Model.Table.Id&id=@idValue"
-                                               target="_blank" rel="noopener">
-                                                Mở trang
-                                            </a>
-                                        }
-
-                                        @if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
-                                        {
-                                            var idStr = idValue.ToString();
-                                            var url = Model.Table.CustomDetailUrl
-                                            .Replace("{id}", idStr)
-                                            .Replace("{pk}", idStr);
-
-                                            <a class="btn btn-outline-primary btn-sm cmstools-action-btn"
-                                               href="@url"
-                                               target="_blank" rel="noopener">
-                                                Mở trang
-                                            </a>
-                                        }
-
-                                        <button type="button"
-                                                class="btn btn-outline-secondary btn-sm cmstools-action-btn"
-                                                data-cms-modal="row"
-                                                data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                data-url="@Url.Action("DetailsModal", "Data", new { tableId = Model.Table.Id, id = idValue })">
-                                            <span class="cmstools-action-text">Xem nhanh</span>
-                                        </button>
-                                    </div>
-
-                                    @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
-                                                            && Model.Permission?.CanUpdate == true)
-                                    {
-                                        <div class="cmstools-actions-group d-flex flex-wrap mt-1">
-                                            @{
-                                                var btnText = reviewStatus == 0 ? "Duyệt / Phản hồi" : "Xem / Phản hồi";
-                                                var btnClass = reviewStatus == 0 ? "btn-outline-primary" : "btn-outline-info";
-                                            }
-
-                                            <button type="button"
-                                                    class="btn btn-sm @btnClass cmstools-action-btn"
-                                                    data-cms-modal="row"
-                                                    data-title="Đánh giá #@idValue"
-                                                    data-url="@Url.Action("Modal", "AdminReviews", new { id = idValue })">
-                                                @btnText
-                                            </button>
-
-                                            @if (reviewStatus == 1)
-                                            {
-                                                var hideText = isHidden ? "Hiện trên web" : "Ẩn khỏi web";
-                                                var hideClass = isHidden ? "btn-warning" : "btn-outline-warning";
-                                                var newHiddenValue = isHidden ? "false" : "true";
-
-                                                <form method="post"
-                                                      action="@Url.Action("SetHidden", "AdminReviews")"
-                                                      data-cms-ajax="true"
-                                                      class="d-inline">
-                                                    @Html.AntiForgeryToken()
-                                                    <input type="hidden" name="id" value="@idValue" />
-                                                    <input type="hidden" name="isHidden" value="@newHiddenValue" />
-                                                    <button type="submit" class="btn btn-sm @hideClass cmstools-action-btn">
-                                                        @hideText
-                                                    </button>
-                                                </form>
-                                            }
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        if (Model.Permission != null
-                                        && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
-                                        && Model.Columns.Any(x => x.ColumnName.Equals("status", StringComparison.OrdinalIgnoreCase)))
-                                        {
-                                            object? statusObj = null;
-                                            if (row != null && row.ContainsKey("status")) statusObj = row["status"];
-
-                                            byte statusByte = 0;
-                                            byte.TryParse(statusObj?.ToString(), out statusByte);
-
-                                            <div class="cmstools-actions-group d-flex flex-wrap mt-1">
-                                                <form method="post"
-                                                      asp-controller="Data"
-                                                      asp-action="SetStatus"
-                                                      asp-route-tableId="@Model.Table.Id"
-                                                      asp-route-id="@idValue"
-                                                      class="d-inline">
-                                                    @Html.AntiForgeryToken()
-
-                                                    @if (statusByte == 1)
-                                                    {
-                                                        <input type="hidden" name="status" value="0" />
-                                                        <button type="submit" class="btn btn-sm btn-outline-warning cmstools-action-btn">
-                                                            Ẩn
-                                                        </button>
-                                                    }
-                                                    else
-                                                    {
-                                                        <input type="hidden" name="status" value="1" />
-                                                        <button type="submit" class="btn btn-sm btn-outline-success cmstools-action-btn">
-                                                            Kích hoạt
-                                                        </button>
-                                                    }
-                                                </form>
-                                            </div>
-                                        }
-                                    }
-                                }
-                            </td>
+                            <th class="cmstools-th cmstools-th-actions text-nowrap">Thao tác</th>
 
                             @if (idCol != null)
                             {
-                                object? cellId = null;
-                                if (row != null && row.ContainsKey(idCol.ColumnName)) cellId = row[idCol.ColumnName];
-
-                                <td class="cmstools-td text-nowrap">
-                                    @RenderCell(idCol, cellId)
-                                </td>
+                                <th class="cmstools-th text-nowrap" style="width:80px;">
+                                    @(idCol.DisplayName ?? idCol.ColumnName)
+                                </th>
                             }
 
                             @foreach (var c in otherCols)
                             {
-                                object? cell = null;
-                                if (row != null && row.ContainsKey(c.ColumnName)) cell = row[c.ColumnName];
+                                var thStyle = BuildThStyle(c);
+                                <th class="cmstools-th text-nowrap" style="@thStyle">
+                                    @(c.DisplayName ?? c.ColumnName)
+                                </th>
+                            }
+                        </tr>
+                    </thead>
 
-                                var isImageCol = IsImageColumn(c);
+                    <tbody>
+                        @foreach (System.Collections.Generic.IDictionary<string, object?> row in Model.Rows)
+                        {
+                            object? idValue = null;
+                            if (row != null && row.ContainsKey("id")) idValue = row["id"];
 
-                                if (isImageCol)
-                                {
-                                    var url = cell?.ToString() ?? string.Empty;
-                                    if (string.IsNullOrWhiteSpace(url))
+                            byte reviewStatus = 0;
+                            if (row != null && row.ContainsKey("status"))
+                                byte.TryParse(row["status"]?.ToString(), out reviewStatus);
+
+                            bool isHidden = false;
+                            if (row != null && row.ContainsKey("is_hidden"))
+                                bool.TryParse(row["is_hidden"]?.ToString(), out isHidden);
+
+                            <tr>
+                                <td class="cmstools-td cmstools-td-actions">
+                                    @if (idValue != null)
                                     {
-                                        <td class="cmstools-td"></td>
-                                    }
-                                    else
-                                    {
-                                        <td class="cmstools-td">
-                                            <a href="@url" target="_blank" rel="noopener noreferrer">
-                                                <img src="@url" alt="img" class="cmstools-img-thumb" />
-                                            </a>
-                                        </td>
-                                    }
-                                }
-                                else if (string.Equals(c.ColumnName, "status", StringComparison.OrdinalIgnoreCase) && cell is not null)
-                                {
-                                    byte statusByte;
-                                    if (byte.TryParse(cell.ToString(), out statusByte))
-                                    {
-                                        <td class="cmstools-td">
-                                            @if (Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase)
-                                                                    || string.Equals(c.Format, "reviewStatus", StringComparison.OrdinalIgnoreCase))
+                                        <div class="cmstools-actions-group d-flex flex-wrap">
+                                            @if (Model.Permission?.CanUpdate == true)
                                             {
-                                                if (statusByte == 0)
-                                                {
-                                                    <span class="badge bg-warning text-dark">Chờ duyệt</span>
+                                                <button type="button"
+                                                        class="btn btn-primary btn-sm cmstools-action-btn"
+                                                        data-cms-modal="form"
+                                                        data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                                        data-url="@Url.Action("EditForm", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                                    Sửa
+                                                </button>
+                                            }
+                                            else if (Model.Permission?.CanView == true && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                            {
+                                                <a class="btn btn-outline-secondary btn-sm cmstools-action-btn"
+                                                   href="/Data/Details?tableId=@Model.Table.Id&id=@idValue"
+                                                   target="_blank" rel="noopener">
+                                                    Mở trang
+                                                </a>
+                                            }
+
+                                            @if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                            {
+                                                var idStr = idValue.ToString();
+                                                var url = Model.Table.CustomDetailUrl
+                                                .Replace("{id}", idStr)
+                                                .Replace("{pk}", idStr);
+
+                                                <a class="btn btn-outline-primary btn-sm cmstools-action-btn"
+                                                   href="@url"
+                                                   target="_blank" rel="noopener">
+                                                    Mở trang
+                                                </a>
+                                            }
+
+                                            <button type="button"
+                                                    class="btn btn-outline-secondary btn-sm cmstools-action-btn"
+                                                    data-cms-modal="row"
+                                                    data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                                    data-url="@Url.Action("DetailsModal", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                                <span class="cmstools-action-text">Xem nhanh</span>
+                                            </button>
+                                        </div>
+
+                                        @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
+                                                                    && Model.Permission?.CanUpdate == true)
+                                        {
+                                            <div class="cmstools-actions-group d-flex flex-wrap mt-1">
+                                                @{
+                                                    var btnText = reviewStatus == 0 ? "Duyệt / Phản hồi" : "Xem / Phản hồi";
+                                                    var btnClass = reviewStatus == 0 ? "btn-outline-primary" : "btn-outline-info";
                                                 }
-                                                else if (statusByte == 1)
+
+                                                <button type="button"
+                                                        class="btn btn-sm @btnClass cmstools-action-btn"
+                                                        data-cms-modal="row"
+                                                        data-title="Đánh giá #@idValue"
+                                                        data-url="@Url.Action("Modal", "AdminReviews", new { id = idValue })">
+                                                    @btnText
+                                                </button>
+
+                                                @if (reviewStatus == 1)
                                                 {
-                                                    if (isHidden)
+                                                    var hideText = isHidden ? "Hiện trên web" : "Ẩn khỏi web";
+                                                    var hideClass = isHidden ? "btn-warning" : "btn-outline-warning";
+                                                    var newHiddenValue = isHidden ? "false" : "true";
+
+                                                    <form method="post"
+                                                          action="@Url.Action("SetHidden", "AdminReviews")"
+                                                          data-cms-ajax="true"
+                                                          class="d-inline">
+                                                        @Html.AntiForgeryToken()
+                                                        <input type="hidden" name="id" value="@idValue" />
+                                                        <input type="hidden" name="isHidden" value="@newHiddenValue" />
+                                                        <button type="submit" class="btn btn-sm @hideClass cmstools-action-btn">
+                                                            @hideText
+                                                        </button>
+                                                    </form>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            if (Model.Permission != null
+                                            && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
+                                            && Model.Columns.Any(x => x.ColumnName.Equals("status", StringComparison.OrdinalIgnoreCase)))
+                                            {
+                                                object? statusObj = null;
+                                                if (row != null && row.ContainsKey("status")) statusObj = row["status"];
+
+                                                byte statusByte = 0;
+                                                byte.TryParse(statusObj?.ToString(), out statusByte);
+
+                                                <div class="cmstools-actions-group d-flex flex-wrap mt-1">
+                                                    <form method="post"
+                                                          asp-controller="Data"
+                                                          asp-action="SetStatus"
+                                                          asp-route-tableId="@Model.Table.Id"
+                                                          asp-route-id="@idValue"
+                                                          class="d-inline">
+                                                        @Html.AntiForgeryToken()
+
+                                                        @if (statusByte == 1)
+                                                        {
+                                                            <input type="hidden" name="status" value="0" />
+                                                            <button type="submit" class="btn btn-sm btn-outline-warning cmstools-action-btn">
+                                                                Ẩn
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <input type="hidden" name="status" value="1" />
+                                                            <button type="submit" class="btn btn-sm btn-outline-success cmstools-action-btn">
+                                                                Kích hoạt
+                                                            </button>
+                                                        }
+                                                    </form>
+                                                </div>
+                                            }
+                                        }
+                                    }
+                                </td>
+
+                                @if (idCol != null)
+                                {
+                                    object? cellId = null;
+                                    if (row != null && row.ContainsKey(idCol.ColumnName)) cellId = row[idCol.ColumnName];
+
+                                    <td class="cmstools-td text-nowrap">
+                                        @RenderCell(idCol, cellId)
+                                    </td>
+                                }
+
+                                @foreach (var c in otherCols)
+                                {
+                                    object? cell = null;
+                                    if (row != null && row.ContainsKey(c.ColumnName)) cell = row[c.ColumnName];
+
+                                    var isImageCol = IsImageColumn(c);
+
+                                    if (isImageCol)
+                                    {
+                                        var url = cell?.ToString() ?? string.Empty;
+                                        if (string.IsNullOrWhiteSpace(url))
+                                        {
+                                            <td class="cmstools-td"></td>
+                                        }
+                                        else
+                                        {
+                                            <td class="cmstools-td">
+                                                <a href="@url" target="_blank" rel="noopener noreferrer">
+                                                    <img src="@url" alt="img" class="cmstools-img-thumb" />
+                                                </a>
+                                            </td>
+                                        }
+                                    }
+                                    else if (string.Equals(c.ColumnName, "status", StringComparison.OrdinalIgnoreCase) && cell is not null)
+                                    {
+                                        byte statusByte;
+                                        if (byte.TryParse(cell.ToString(), out statusByte))
+                                        {
+                                            <td class="cmstools-td">
+                                                @if (Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase)
+                                                                            || string.Equals(c.Format, "reviewStatus", StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    if (statusByte == 0)
                                                     {
-                                                        <span class="badge bg-secondary text-light">Đã duyệt (đang ẩn)</span>
+                                                        <span class="badge bg-warning text-dark">Chờ duyệt</span>
+                                                    }
+                                                    else if (statusByte == 1)
+                                                    {
+                                                        if (isHidden)
+                                                        {
+                                                            <span class="badge bg-secondary text-light">Đã duyệt (đang ẩn)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-success">Đã duyệt</span>
+                                                        }
+                                                    }
+                                                    else if (statusByte == 2)
+                                                    {
+                                                        <span class="badge bg-danger">Đã từ chối</span>
                                                     }
                                                     else
                                                     {
-                                                        <span class="badge bg-success">Đã duyệt</span>
+                                                        @statusByte.ToString()
                                                     }
                                                 }
-                                                else if (statusByte == 2)
-                                                {
-                                                    <span class="badge bg-danger">Đã từ chối</span>
-                                                }
                                                 else
                                                 {
-                                                    @statusByte.ToString()
+                                                    if (statusByte == 1)
+                                                    {
+                                                        <span class="badge bg-success">Active</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-secondary">Inactive</span>
+                                                    }
                                                 }
-                                            }
-                                            else
-                                            {
-                                                if (statusByte == 1)
-                                                {
-                                                    <span class="badge bg-success">Active</span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="badge bg-secondary">Inactive</span>
-                                                }
-                                            }
-                                        </td>
+                                            </td>
+                                        }
+                                        else
+                                        {
+                                            <td class="cmstools-td">@RenderCell(c, cell)</td>
+                                        }
+                                    }
+                                    else if (IsFkColumn(c))
+                                    {
+                                        <td class="cmstools-td">@RenderFkCell(c, cell, lookupMap)</td>
                                     }
                                     else
                                     {
                                         <td class="cmstools-td">@RenderCell(c, cell)</td>
                                     }
                                 }
-                                else if (IsFkColumn(c))
-                                {
-                                    <td class="cmstools-td">@RenderFkCell(c, cell, lookupMap)</td>
-                                }
-                        
-
-                                else
-                                {
-                                    <td class="cmstools-td">@RenderCell(c, cell)</td>
-                                }
-                            }
-                        </tr>
-                    }
-                </tbody>
-            </table>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
-}
+    }
 
-@if (Model.TotalPages > 1)
-{
-    <nav class="mt-3">
-        <ul class="pagination pagination-sm flex-wrap">
-            @for (int i = 1; i <= Model.TotalPages; i++)
-            {
-                var active = (i == Model.Page);
-                <li class="page-item @(active ? "active" : "")">
-                    <a class="page-link"
-                       asp-controller="Data"
-                       asp-action="List"
-                       asp-route-tableId="@Model.Table.Id"
-                       asp-route-page="@i"
-                       asp-route-pageSize="@Model.PageSize"
-                       asp-all-route-data="Model.Filters">
-                        @i
-                    </a>
-                </li>
-            }
-        </ul>
-    </nav>
-}
+    @if (Model.TotalPages > 1)
+    {
+        <nav class="mt-3">
+            <ul class="pagination pagination-sm flex-wrap">
+                @for (int i = 1; i <= Model.TotalPages; i++)
+                {
+                    var active = (i == Model.Page);
+                    <li class="page-item @(active ? "active" : "")">
+                        <a class="page-link"
+                           asp-controller="Data"
+                           asp-action="List"
+                           asp-route-tableId="@Model.Table.Id"
+                           asp-route-page="@i"
+                           asp-route-pageSize="@Model.PageSize"
+                           asp-all-route-data="Model.Filters">
+                            @i
+                        </a>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
 
+</div>
+<!-- ✅ END WRAP -->
 @section Scripts {
     <script>
         // ✅ Chỉ giữ sync checkbox -> dropdown status (modal đã xử lý ở site.js)

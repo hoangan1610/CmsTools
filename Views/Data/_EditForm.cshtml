@@ -181,6 +181,17 @@
         background: #f8f9fa !important;
         color: #6b7280;
     }
+
+    /* Toast container */
+    .cms-toast-wrap {
+        position: fixed;
+        right: 16px;
+        top: 16px;
+        z-index: 1085;
+        display: flex;
+        flex-direction: column;
+        gap: .5rem;
+    }
 </style>
 
 <form asp-action="Edit"
@@ -377,7 +388,6 @@
                             }
                             else
                             {
-
                                 <text>&nbsp;</text>
                             }
                         </div>
@@ -391,17 +401,17 @@
                             {
                                 <text> | Format: </text>
                                 <code>@col.Format</code>
-     }
+                            }
                             @if (!string.IsNullOrWhiteSpace(col.DefaultExpr))
                             {
                                 <text> | default_expr: </text>
                                 <code>@col.DefaultExpr</code>
-     }
+                            }
                             @if (maxLen.HasValue)
                             {
                                 <text> | max: </text>
                                 <code>@maxLen.Value</code>
-     }
+                            }
                         </div>
                     </details>
                 </div>
@@ -410,30 +420,149 @@
     </div>
 
     <div class="d-flex gap-2 mt-3">
-        <button type="submit" class="btn btn-primary px-4">Lưu</button>
+        <button type="submit" class="btn btn-primary px-4" data-cms-submit="1">Lưu</button>
         <a class="btn btn-outline-secondary" href="@Url.Action("List", "Data", new { tableId = Model.Table.Id })">Quay lại</a>
     </div>
 </form>
 
 <script>
     (function () {
-      // reuse y hệt Create (để modal inject vẫn chạy)
-      if (!window.cmsCreateFormInit) {
-        // nếu bạn tách file, thì đảm bảo Create script load trước
-        // ở đây fallback đơn giản: không làm gì
+      "use strict";
+
+      // ===== Toast helper (Bootstrap 5) =====
+      function ensureToastWrap() {
+        let wrap = document.querySelector(".cms-toast-wrap");
+        if (!wrap) {
+          wrap = document.createElement("div");
+          wrap.className = "cms-toast-wrap";
+          document.body.appendChild(wrap);
+        }
+        return wrap;
       }
 
-      function cmsEditFormInit(root) {
-        if (window.cmsCreateFormInit) return window.cmsCreateFormInit(root);
+      function showToast(message, type) {
+        // type: success | danger | warning | info
+        const wrap = ensureToastWrap();
+        const toast = document.createElement("div");
+        toast.className = "toast align-items-center text-bg-" + (type || "success") + " border-0";
+        toast.setAttribute("role", "alert");
+        toast.setAttribute("aria-live", "assertive");
+        toast.setAttribute("aria-atomic", "true");
+        toast.innerHTML = `
+          <div class="d-flex">
+            <div class="toast-body">${escapeHtml(message || "")}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+          </div>`;
+        wrap.appendChild(toast);
+
+        const t = bootstrap.Toast.getOrCreateInstance(toast, { delay: 2200 });
+        toast.addEventListener("hidden.bs.toast", () => toast.remove());
+        t.show();
       }
 
-      window.cmsEditFormInit = cmsEditFormInit;
+      function escapeHtml(s) {
+        return String(s)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
 
-      // auto-init khi load page thường (không modal)
+      // ===== Ajax form init =====
+      function initCmsEditForm(root) {
+        root = root || document;
+
+        const forms = root.querySelectorAll('form[data-cms-ajax="true"][data-cms-form="1"]');
+        forms.forEach(form => {
+          if (form.dataset.cmsInited === "1") return;
+          form.dataset.cmsInited = "1";
+
+          form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const submitBtn = form.querySelector('[data-cms-submit="1"]') || form.querySelector('button[type="submit"]');
+            const oldText = submitBtn ? submitBtn.innerHTML : null;
+
+            try {
+              if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Đang lưu...`;
+              }
+
+              const fd = new FormData(form);
+              const res = await fetch(form.action, {
+                method: "POST",
+                body: fd,
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+              });
+
+              const ct = (res.headers.get("content-type") || "").toLowerCase();
+
+              // 1) JSON => success/fail message
+              if (ct.includes("application/json")) {
+                const data = await res.json().catch(() => null);
+
+                if (res.ok && data && (data.ok === true || data.success === true)) {
+                  showToast(data.message || "Lưu thành công.", "success");
+
+                  // Đóng modal nếu form nằm trong modal
+                  const modalEl = form.closest(".modal");
+                  if (modalEl) {
+                    const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                    m.hide();
+                  }
+
+                  // bắn event cho trang list nếu bạn muốn bắt để reload
+                  document.dispatchEvent(new CustomEvent("cms:data:saved", {
+                    detail: {
+                      tableId: @Model.Table.Id,
+                      id: "@(pkValue ?? "")"
+                    }
+                  }));
+
+                  return;
+                }
+
+                // JSON nhưng báo lỗi
+                showToast((data && data.message) ? data.message : "Lưu thất bại.", "danger");
+                return;
+              }
+
+              // 2) HTML => thường là partial view có validation errors
+              const html = await res.text();
+              if (!res.ok) {
+                showToast("Có lỗi khi lưu. Vui lòng kiểm tra lại.", "danger");
+              }
+
+              // Replace vùng chứa form (ưu tiên container modal-body nếu có)
+              const container = form.closest(".modal-body") || form.parentElement;
+              if (container) {
+                container.innerHTML = html;
+                initCmsEditForm(container); // init lại cho nội dung mới
+              }
+
+            } catch (err) {
+              console.error(err);
+              showToast("Lỗi mạng hoặc server. Vui lòng thử lại.", "danger");
+            } finally {
+              if (submitBtn) {
+                submitBtn.disabled = false;
+                if (oldText != null) submitBtn.innerHTML = oldText;
+              }
+            }
+          });
+        });
+      }
+
+      // Export (để modal inject gọi lại)
+      window.cmsEditFormInit = initCmsEditForm;
+
+      // Auto init
       if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", () => cmsEditFormInit(document));
+        document.addEventListener("DOMContentLoaded", () => initCmsEditForm(document));
       } else {
-        cmsEditFormInit(document);
+        initCmsEditForm(document);
       }
     })();
 </script>

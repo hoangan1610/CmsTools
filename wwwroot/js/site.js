@@ -46,6 +46,67 @@
     }
 
     // =========================
+    // [B2] Toast helper (Bootstrap 5)
+    // =========================
+    function ensureToastWrap() {
+        let wrap = document.querySelector(".cms-toast-wrap");
+        if (!wrap) {
+            wrap = document.createElement("div");
+            wrap.className = "cms-toast-wrap";
+            // inline style để khỏi cần css riêng
+            wrap.style.position = "fixed";
+            wrap.style.right = "16px";
+            wrap.style.top = "16px";
+            wrap.style.zIndex = "1085";
+            wrap.style.display = "flex";
+            wrap.style.flexDirection = "column";
+            wrap.style.gap = ".5rem";
+            document.body.appendChild(wrap);
+        }
+        return wrap;
+    }
+
+    function escapeHtml(s) {
+        return String(s ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    function showToast(message, type) {
+        // type: success | danger | warning | info
+        const wrap = ensureToastWrap();
+
+        const toast = document.createElement("div");
+        toast.className = "toast align-items-center text-bg-" + (type || "success") + " border-0";
+        toast.setAttribute("role", "alert");
+        toast.setAttribute("aria-live", "assertive");
+        toast.setAttribute("aria-atomic", "true");
+
+        toast.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body">${escapeHtml(message || "")}</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>`;
+
+        wrap.appendChild(toast);
+
+        const t = bootstrap.Toast.getOrCreateInstance(toast, { delay: 2200 });
+        toast.addEventListener("hidden.bs.toast", () => toast.remove());
+        t.show();
+    }
+
+    function closeModalIfInside(form) {
+        const modalEl = form.closest(".modal");
+        if (!modalEl) return false;
+        const inst = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+        inst.hide();
+        return true;
+    }
+
+    // =========================
     // [C] Upload to HAFood API (Phương án A)
     // =========================
     async function uploadToApi(file) {
@@ -160,12 +221,29 @@
         });
     }
 
+    function initImageClear(root) {
+        qsa(root, 'input[data-clear-btn]').forEach(inp => {
+            if (inp.dataset.clearBound === "1") return;
+            inp.dataset.clearBound = "1";
+
+            const clearId = inp.getAttribute("data-clear-btn");
+            const btn = findById(root, clearId);
+            if (!btn) return;
+
+            btn.addEventListener("click", function () {
+                inp.value = "";
+                inp.dispatchEvent(new Event("input", { bubbles: true }));
+                inp.focus();
+            });
+        });
+    }
+
     function initImageUpload(root) {
         qsa(root, 'input.cms-img-file[data-target-input]').forEach(fileInp => {
             if (fileInp.dataset.upBound === "1") return;
             fileInp.dataset.upBound = "1";
 
-            const targetIdRaw = fileInp.getAttribute("data-target-input"); // bạn đang để "field_xxx"
+            const targetIdRaw = fileInp.getAttribute("data-target-input"); // "field_xxx"
             const statusId = fileInp.getAttribute("data-status-id");
 
             const target = targetIdRaw ? findById(root, targetIdRaw) : null;
@@ -199,6 +277,7 @@
         root = root || document;
         initFkFilter(root);
         initImagePreview(root);
+        initImageClear(root);
         initImageUpload(root);
     }
 
@@ -214,13 +293,20 @@
     const modalBodyEl = document.getElementById("cmsModalBody");
     const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
 
+    // Lưu URL modal hiện tại để có thể reload modal sau submit nếu muốn
+    let __cmsCurrentModalUrl = null;
+    let __cmsCurrentModalTitle = null;
+
     async function openCmsModal(url, title) {
         if (!modal || !modalEl || !modalBodyEl) {
             alert("Thiếu #cmsModal trong layout hoặc bootstrap chưa load.");
             return;
         }
 
-        modalTitleEl.textContent = title || "Modal";
+        __cmsCurrentModalUrl = url;
+        __cmsCurrentModalTitle = title || "Modal";
+
+        modalTitleEl.textContent = __cmsCurrentModalTitle;
         modalBodyEl.innerHTML = `
       <div class="py-4 text-center text-muted">
         <div class="spinner-border" role="status"></div>
@@ -241,10 +327,12 @@
         initCmsForm(modalBodyEl);
     }
 
+    async function reloadCmsModal() {
+        if (!__cmsCurrentModalUrl) return;
+        await openCmsModal(__cmsCurrentModalUrl, __cmsCurrentModalTitle);
+    }
+
     // Click handler: bất kỳ element có data-cms-modal
-    // Cách dùng:
-    // <a data-cms-modal data-url="..." data-title="...">...</a>
-    // hoặc <button data-cms-modal data-url="...">...</button>
     document.addEventListener("click", function (e) {
         const el = e.target.closest("[data-cms-modal]");
         if (!el) return;
@@ -263,7 +351,35 @@
     });
 
     // =========================
-    // [F] AJAX submit cho form trong modal (data-cms-ajax="true")
+    // [F0] ✅ FIX: ghi nhớ nút submit được click (submitter)
+    // =========================
+    function setFormSubmitter(form, submitter) {
+        if (!form || !submitter) return;
+        const name = submitter.getAttribute("name");
+        if (!name) {
+            form.__cms_submitter = null;
+            return;
+        }
+        const value = submitter.getAttribute("value") ?? "";
+        form.__cms_submitter = { name, value };
+    }
+
+    // Bắt click vào button submit trong form ajax để lưu submitter
+    document.addEventListener("click", function (e) {
+        const btn = e.target.closest('button[type="submit"], input[type="submit"]');
+        if (!btn) return;
+
+        const form = btn.form;
+        if (!form) return;
+
+        // chỉ form ajax
+        if (!form.matches || !form.matches('form[data-cms-ajax="true"]')) return;
+
+        setFormSubmitter(form, btn);
+    }, true);
+
+    // =========================
+    // [F] AJAX submit cho form (modal + page) (data-cms-ajax="true")
     // =========================
     document.addEventListener("submit", async function (e) {
         const form = e.target;
@@ -273,34 +389,102 @@
 
         const action = form.action;
         const method = (form.method || "post").toUpperCase();
-        const fd = new FormData(form);
 
-        const res = await fetch(action, {
-            method: method,
-            body: fd,
-            headers: { "X-Requested-With": "XMLHttpRequest" }
-        });
+        // disable submit + spinner
+        const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+        const oldBtnHtml = submitBtn ? submitBtn.innerHTML : null;
+        const oldBtnVal = submitBtn && submitBtn.tagName === "INPUT" ? submitBtn.value : null;
 
-        if (isJsonResponse(res)) {
-            const json = await res.json().catch(() => null);
-            if (json && json.ok) {
-                // đóng modal + reload list cho đơn giản
-                if (modal) modal.hide();
-                window.location.reload();
+        try {
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                if (submitBtn.tagName === "BUTTON") {
+                    submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Đang lưu...`;
+                } else {
+                    submitBtn.value = "Đang lưu...";
+                }
+            }
+
+            const fd = new FormData(form);
+
+            // ✅ FIX: append submitter nếu chưa có trong FormData
+            const sub = form.__cms_submitter;
+            if (sub && sub.name) {
+                if (!fd.has(sub.name)) {
+                    fd.append(sub.name, sub.value ?? "");
+                }
+            }
+            form.__cms_submitter = null;
+
+            const res = await fetch(action, {
+                method: method,
+                body: fd,
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+
+            if (isJsonResponse(res)) {
+                const json = await res.json().catch(() => null);
+
+                if (json && json.ok) {
+                    // ✅ Success behavior:
+                    // - default: toast + đóng modal (nếu đang ở modal)
+                    // - optional: <form data-cms-success="reload-modal"> => toast + reload modal
+                    const mode = (form.getAttribute("data-cms-success") || "close").toLowerCase();
+
+                    showToast(json.message || json.msg || "Lưu thành công.", "success");
+
+                    // bắn event cho trang list muốn reload/update row
+                    document.dispatchEvent(new CustomEvent("cms:data:saved", {
+                        detail: {
+                            action: action,
+                            mode: mode,
+                            result: json
+                        }
+                    }));
+
+                    if (mode === "reload-modal") {
+                        await reloadCmsModal();
+                        return;
+                    }
+
+                    // close modal nếu form nằm trong modal
+                    const closed = closeModalIfInside(form);
+
+                    // nếu không nằm trong modal (trang thường), bạn có thể reload nhẹ nếu muốn:
+                    // if (!closed) window.location.reload();
+
+                    return;
+                }
+
+                showToast(json?.message || json?.msg || "Lưu thất bại.", "danger");
                 return;
             }
 
-            alert(json?.message || json?.msg || "Lưu thất bại");
-            return;
+            // HTML partial trả về (validation error / view)
+            const html = await res.text();
+            const body = form.closest(".modal-body") || modalBodyEl || form.parentElement || document.body;
+            body.innerHTML = html;
+
+            // re-init widgets
+            initCmsForm(body);
+
+            // nếu response không ok, báo toast nhẹ
+            if (!res.ok) showToast("Có lỗi khi lưu. Vui lòng kiểm tra lại.", "danger");
         }
-
-        // HTML partial trả về (validation error)
-        const html = await res.text();
-        const body = form.closest(".modal-body") || modalBodyEl || document.body;
-        body.innerHTML = html;
-
-        // re-init widgets
-        initCmsForm(body);
+        catch (err) {
+            console.error(err);
+            showToast("Lỗi mạng hoặc server. Vui lòng thử lại.", "danger");
+        }
+        finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                if (submitBtn.tagName === "BUTTON") {
+                    if (oldBtnHtml != null) submitBtn.innerHTML = oldBtnHtml;
+                } else {
+                    if (oldBtnVal != null) submitBtn.value = oldBtnVal;
+                }
+            }
+        }
     }, true);
 
     // =========================
@@ -308,6 +492,75 @@
     // =========================
     document.addEventListener("DOMContentLoaded", function () {
         initCmsForm(document);
+
+        // (Optional) Nếu bạn muốn auto reload list sau khi save trong modal:
+        // document.addEventListener("cms:data:saved", () => window.location.reload());
     });
+
+
+    // =========================
+    // [H] Auto refresh List after modal saved
+    // =========================
+    async function refreshCmsList() {
+        const listRoot = document.getElementById("cmsListRoot");
+        if (!listRoot) {
+            // không phải trang List → thôi
+            return;
+        }
+
+        // giữ scroll cho đỡ giật
+        const scrollY = window.scrollY;
+
+        try {
+            // lấy lại đúng URL hiện tại (giữ filter/page/querystring)
+            const url = window.location.href;
+
+            const res = await fetch(url, {
+                method: "GET",
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+
+            const html = await res.text();
+
+            // parse HTML mới và trích đúng #cmsListRoot
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+            const newRoot = doc.getElementById("cmsListRoot");
+
+            if (!newRoot) {
+                // server trả về không có wrapper → fallback reload full
+                window.location.reload();
+                return;
+            }
+
+            // replace DOM
+            listRoot.innerHTML = newRoot.innerHTML;
+
+            // init lại các widget trong vùng list (nếu list có FK filter / image / ... )
+            // (initCmsForm của bạn init FK/image; ok để gọi)
+            initCmsForm(listRoot);
+
+            // khôi phục scroll
+            window.scrollTo(0, scrollY);
+        } catch (e) {
+            console.error(e);
+            // lỗi fetch → fallback reload full
+            window.location.reload();
+        }
+    }
+
+    // Lắng nghe event save thành công (đã dispatch ở đoạn submit JSON ok)
+    document.addEventListener("cms:data:saved", function () {
+        // nếu đang có modal, đợi modal đóng hẳn rồi refresh list
+        if (modalEl && modalEl.classList.contains("show")) {
+            modalEl.addEventListener("hidden.bs.modal", function onHidden() {
+                modalEl.removeEventListener("hidden.bs.modal", onHidden);
+                refreshCmsList();
+            });
+        } else {
+            refreshCmsList();
+        }
+    });
+
 
 })();

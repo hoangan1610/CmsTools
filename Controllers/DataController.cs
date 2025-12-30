@@ -53,7 +53,7 @@ namespace CmsTools.Controllers
         {
             page = page < 1 ? 1 : page;
             pageSize = pageSize < 1 ? 50 : pageSize;
-            pageSize = Math.Min(pageSize, 200); // tránh kéo quá nặng
+            pageSize = Math.Min(pageSize, 200);
 
             var table = await _meta.GetTableAsync(tableId);
             if (table == null) return NotFound("Table metadata not found or disabled.");
@@ -166,11 +166,18 @@ namespace CmsTools.Controllers
                 Permission = perm
             };
 
-            // ✅ lookup FK (cache)
-            ViewBag.Lookups = await BuildLookupsAsync(connMeta, listCols, HttpContext.RequestAborted);
+            // ✅ lookup FK: phải gồm cả cột đang filter
+            var lookupCols = listCols
+                .Concat(filterCols)
+                .GroupBy(x => x.ColumnName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+
+            ViewBag.Lookups = await BuildLookupsAsync(connMeta, lookupCols, HttpContext.RequestAborted);
 
             return View(vm);
         }
+
 
         // =========================
         // EXPORT CSV

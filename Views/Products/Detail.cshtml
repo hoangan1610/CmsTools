@@ -2,75 +2,76 @@
 @using System.Globalization
 
 @{
-    ViewData["Title"] = "Product detail - " + Model.Product.Name;
+    ViewData["Title"] = "Chi tiết sản phẩm - " + Model.Product.Name;
 }
 
 <h2 class="mt-3 mb-3">
     @Model.Product.Name
-    <small class="text-muted">(@Model.Product.Id)</small>
+    <small class="text-muted">(#@Model.Product.Id)</small>
 </h2>
 
 <div class="row mb-4">
     <div class="col-md-8">
         <dl class="row">
-            <dt class="col-sm-3">Brand</dt>
+            <dt class="col-sm-3">Thương hiệu</dt>
             <dd class="col-sm-9">@Model.Product.BrandName</dd>
 
             <dt class="col-sm-3">Tag</dt>
             <dd class="col-sm-9">@Model.Product.Tag</dd>
 
-            <dt class="col-sm-3">Keyword</dt>
+            <dt class="col-sm-3">Từ khóa</dt>
             <dd class="col-sm-9">@Model.Product.ProductKeyword</dd>
 
-            <dt class="col-sm-3">Status</dt>
+            <dt class="col-sm-3">Trạng thái</dt>
             <dd class="col-sm-9">
                 @if (Model.Product.Status == 1)
                 {
-                    <span class="badge bg-success">Active</span>
+                    <span class="badge bg-success">Đang hoạt động</span>
                 }
                 else
                 {
-                    <span class="badge bg-secondary">Inactive</span>
+                    <span class="badge bg-secondary">Đang ẩn</span>
                 }
             </dd>
 
-            <dt class="col-sm-3">Created</dt>
+            <dt class="col-sm-3">Ngày tạo</dt>
             <dd class="col-sm-9">
                 @Model.Product.CreatedAt.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture)
             </dd>
 
-            <dt class="col-sm-3">Updated</dt>
+            <dt class="col-sm-3">Cập nhật</dt>
             <dd class="col-sm-9">
                 @Model.Product.UpdatedAt.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture)
             </dd>
         </dl>
     </div>
+
     <div class="col-md-4">
         @if (!string.IsNullOrWhiteSpace(Model.Product.ImageProduct))
         {
             <div class="text-center">
                 <img src="@Model.Product.ImageProduct"
-                     alt="Product image"
+                     alt="Ảnh sản phẩm"
                      style="max-width:200px;max-height:200px;object-fit:contain;" />
             </div>
         }
     </div>
 </div>
 
-<h4>Variants</h4>
+<h4>Biến thể</h4>
 
 <p>
     <a class="btn btn-sm btn-success"
        asp-controller="Products"
        asp-action="CreateVariant"
        asp-route-productId="@Model.Product.Id">
-        + Thêm variant
+        + Thêm biến thể
     </a>
 </p>
 
 @if (Model.Variants == null || !Model.Variants.Any())
 {
-    <p class="text-muted">Sản phẩm chưa có variant nào.</p>
+    <p class="text-muted">Sản phẩm chưa có biến thể nào.</p>
 }
 else
 {
@@ -78,14 +79,14 @@ else
         <table class="table table-sm table-bordered align-middle">
             <thead class="table-light">
                 <tr>
-                    <th style="width:70px;">ID</th>
+                    <th style="width:70px;">Mã</th>
                     <th>Tên</th>
                     <th>SKU</th>
                     <th>Ảnh</th>
                     <th class="text-end">Giá bán</th>
                     <th class="text-end">Tồn kho</th>
-                    <th style="width:100px;">Trạng thái</th>
-                    <th style="width:200px;">Thao tác</th>
+                    <th style="width:120px;">Trạng thái</th>
+                    <th style="width:220px;">Thao tác</th>
                 </tr>
             </thead>
             <tbody>
@@ -98,25 +99,23 @@ else
                         <td>
                             @if (!string.IsNullOrWhiteSpace(v.Image))
                             {
-                                <a href="@v.Image" target="_blank" rel="noopener noreferrer">
+                                <a href="@v.Image" target="_blank" rel="noopener noreferrer" title="Mở ảnh">
                                     <img src="@v.Image"
-                                         alt="variant"
+                                         alt="Ảnh biến thể"
                                          style="max-height:40px;max-width:80px;object-fit:contain;" />
                                 </a>
                             }
                         </td>
-                        <td class="text-end">
-                            @v.RetailPrice.ToString("N0", CultureInfo.CurrentCulture)
-                        </td>
+                        <td class="text-end">@v.RetailPrice.ToString("N0", CultureInfo.CurrentCulture)</td>
                         <td class="text-end">@v.Stock</td>
                         <td>
                             @if (v.Status == 1)
                             {
-                                <span class="badge bg-success">Active</span>
+                                <span class="badge bg-success">Đang bán</span>
                             }
                             else
                             {
-                                <span class="badge bg-secondary">Inactive</span>
+                                <span class="badge bg-secondary">Đang ẩn</span>
                             }
                         </td>
                         <td>
@@ -137,7 +136,7 @@ else
                                 @Html.AntiForgeryToken()
                                 <button type="submit"
                                         class="btn btn-sm @(v.Status == 1 ? "btn-warning" : "btn-success")">
-                                    @(v.Status == 1 ? "Ẩn" : "Kích hoạt")
+                                    @(v.Status == 1 ? "Ẩn" : "Hiện")
                                 </button>
                             </form>
                         </td>
