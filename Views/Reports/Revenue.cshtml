@@ -16,11 +16,9 @@
     if (rangeDays < 1) rangeDays = 1;
 
     // ===== KPI nâng cao =====
-    // NOTE: Rows.Count là số period có dữ liệu (ngày hoặc tháng)
     var periodCount = hasRows ? Model.Rows.Count : 0;
     var periodLabel = (Model.GroupBy == "month") ? "Số tháng có đơn" : "Số ngày có đơn";
 
-    // TB/ngày theo toàn kỳ lọc
     var avgRevenuePerDay = (rangeDays > 0)
         ? (Model.Overview.TotalPayTotal / rangeDays)
         : 0m;
@@ -29,7 +27,6 @@
         ? (Model.Overview.TotalDiscountTotal / Model.Overview.TotalSubTotal * 100m)
         : 0m;
 
-    // So sánh với kỳ trước
     var revDelta = Model.RevenueChangePercent;
     var ordDelta = Model.OrdersChangePercent;
 
@@ -49,7 +46,7 @@
         ? "0 %"
         : ordDelta.ToString("0.##", CultureInfo.CurrentCulture) + " %";
 
-    // ===== Data cho Chart.js (trend) =====
+    // ===== Data cho Chart.js (xu hướng doanh thu ghi nhận) =====
     var labelFormat = Model.GroupBy == "month" ? "MM/yyyy" : "dd/MM/yyyy";
     var labels = hasRows
         ? Model.Rows.Select(r => r.PeriodDate.ToString(labelFormat)).ToList()
@@ -77,11 +74,10 @@
 
     var topPeriodDates = new HashSet<DateTime>(top5RevenueDays.Select(r => r.PeriodDate.Date));
 
-    // ===== Data kênh thanh toán =====
+    // ===== Data kênh thanh toán (doanh thu ghi nhận) =====
     var providerRows = Model.Providers ?? new List<RevenueByProviderRow>();
     var hasProviderRows = providerRows.Any();
 
-    // Label hiển thị tránh trùng tên
     var providerDisplayLabels = providerRows
         .Select(p => $"{p.ProviderLabel} ({p.MethodLabel})")
         .ToList();
@@ -93,7 +89,7 @@
     var providerAmountsJson = JsonSerializer.Serialize(providerAmounts);
     var providerOrdersJson = JsonSerializer.Serialize(providerOrders);
 
-    // ===== Tổng hợp COD vs Online =====
+    // ===== Tổng hợp COD vs Online (doanh thu ghi nhận) =====
     var totalRevenue = Model.Overview.TotalPayTotal;
     var totalOrders = Model.Overview.TotalOrders;
 
@@ -122,17 +118,86 @@
         ? (decimal)onlineOrders * 100m / totalOrders
         : 0m;
 
-    // ===== Reconcile: Providers vs Overview =====
+    // ===== Đối soát: tổng theo kênh vs overview =====
     decimal providersSumAmount = hasProviderRows ? providerRows.Sum(p => p.TotalAmount) : 0m;
     int providersSumOrders = hasProviderRows ? providerRows.Sum(p => p.SuccessfulOrders) : 0;
 
     decimal providersAmountDiff = providersSumAmount - totalRevenue;
     int providersOrdersDiff = providersSumOrders - totalOrders;
 
-    // tolerance nhỏ (amount là decimal(12,2) => có thể lệch 0.01~0.99 do rounding hiếm gặp)
     bool providersMismatch =
         hasProviderRows &&
         (Math.Abs(providersAmountDiff) >= 1m || providersOrdersDiff != 0);
+
+    // ==========================================================
+    // ===== DÒNG TIỀN (tiền vào) =====
+    // ==========================================================
+    var cashOv = Model.CashflowOverview ?? new CashflowOverview();
+    var cashRows = Model.CashflowRows ?? new List<CashflowByPeriodRow>();
+    var hasCashRows = cashRows.Any();
+
+    var cashLabels = hasCashRows
+        ? cashRows.Select(r => r.PeriodDate.ToString(labelFormat)).ToList()
+        : new List<string>();
+
+    var cashOnline = hasCashRows ? cashRows.Select(r => r.OnlineAmount).ToList() : new List<decimal>();
+    var cashCod = hasCashRows ? cashRows.Select(r => r.CodAmount).ToList() : new List<decimal>();
+    var cashTotal = hasCashRows ? cashRows.Select(r => r.TotalAmount).ToList() : new List<decimal>();
+
+    var cashLabelsJson = JsonSerializer.Serialize(cashLabels);
+    var cashOnlineJson = JsonSerializer.Serialize(cashOnline);
+    var cashCodJson = JsonSerializer.Serialize(cashCod);
+    var cashTotalJson = JsonSerializer.Serialize(cashTotal);
+
+    var cashProviders = Model.CashflowProviders ?? new List<CashflowByProviderRow>();
+    var hasCashProviders = cashProviders.Any();
+
+    // ==========================================================
+    // ===== PIPELINE (đơn chưa hoàn tất) =====
+    // ==========================================================
+    var pipe = Model.Pipeline ?? new PipelineSnapshot();
+    var pipeRows = Model.PipelineByStatus ?? new List<PipelineByStatusRow>();
+    var hasPipeRows = pipeRows.Any();
+
+    // Mốc pipeline: controller truyền @as_of_excl = ToDate+1 00:00
+    var pipeAsOfText = Model.ToDate.Date.AddDays(1).ToString("dd/MM/yyyy") + " 00:00";
+
+    // ===== Map trạng thái đơn (Type=2) =====
+    var orderStatusMap = new Dictionary<byte, string>
+    {
+        { 0, "Mới tạo" },
+        { 1, "Đã xác nhận" },
+        { 2, "Đang giao" },
+        { 3, "Đã giao" },
+        { 4, "Đã huỷ" },
+        { 5, "Chờ lấy hàng" },
+        { 6, "Đang giao hàng" },
+        { 7, "Đã nhận hàng" },
+        { 8, "Hoàn trả" },
+        { 9, "Huỷ đơn" },
+        { 10, "Khác" },
+    };
+
+    string GetOrderStatusName(byte st)
+        => orderStatusMap.TryGetValue(st, out var name) ? name : ("Trạng thái " + st);
+
+    string BadgeCssByStatus(byte st)
+    {
+        return st switch
+        {
+            0 => "bg-secondary",
+            1 => "bg-info",
+            2 => "bg-primary",
+            3 => "bg-success",
+            4 => "bg-danger",
+            5 => "bg-secondary",
+            6 => "bg-primary",
+            7 => "bg-success",
+            8 => "bg-warning text-dark",
+            9 => "bg-danger",
+            _ => "bg-light text-dark border"
+        };
+    }
 }
 
 <div class="cmstools-page-header mb-3">
@@ -144,8 +209,8 @@
                 <strong>@Model.FromDate.ToString("dd/MM/yyyy") – @Model.ToDate.ToString("dd/MM/yyyy")</strong>
             </span>
             <span class="ms-3 small text-muted">
-                Doanh thu ghi nhận theo <strong>ngày giao hàng (delivered_at)</strong>.
-                Với VNPAY/ZALOPAY phải có <strong>giao dịch thanh toán thành công</strong>.
+                <strong>Doanh thu ghi nhận</strong>: theo <strong>ngày giao/nhận</strong> (delivered_at/received_confirmed_at).
+                <strong>Dòng tiền (tiền vào)</strong>: Online theo <strong>paid_at</strong>, COD theo <strong>giao/nhận</strong>.
             </span>
         </div>
     </div>
@@ -187,19 +252,17 @@
             <div class="col-6 col-md-3">
                 <label class="form-label small mb-1">Nhóm theo</label>
                 <select name="groupBy" class="form-select form-select-sm">
-    @if (Model.GroupBy == "month")
-    {
-        <option value="day">Ngày</option>
-        <option value="month" selected="selected">Tháng</option>
-    }
-    else
-    {
-        <option value="day" selected="selected">Ngày</option>
-        <option value="month">Tháng</option>
-    }
-</select>
-
-
+                    @if (Model.GroupBy == "month")
+                    {
+                        <option value="day">Ngày</option>
+                        <option value="month" selected="selected">Tháng</option>
+                    }
+                    else
+                    {
+                        <option value="day" selected="selected">Ngày</option>
+                        <option value="month">Tháng</option>
+                    }
+                </select>
             </div>
 
             <div class="col-12 col-md-3 d-flex align-items-end">
@@ -212,7 +275,7 @@
                     <div>
                         <button type="submit" class="btn btn-primary btn-sm me-2">Lọc</button>
                         <a class="btn btn-outline-secondary btn-sm"
-                           href="@Url.Action("Revenue", "Reports")">Reset</a>
+                           href="@Url.Action("Revenue", "Reports")">Đặt lại</a>
                     </div>
                 </div>
             </div>
@@ -220,14 +283,14 @@
     </div>
 </div>
 
-@* ==== KPI OVERVIEW ==== *@
+@* ==== KPI OVERVIEW (Doanh thu ghi nhận) ==== *@
 <div class="row g-3 mb-3 report-kpi-row">
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm report-kpi-card report-kpi-main">
             <div class="card-body py-2">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <div class="report-kpi-label">Tổng số đơn</div>
+                        <div class="report-kpi-label">Tổng số đơn (đã giao/nhận)</div>
                         <div class="fw-bold fs-5 report-kpi-value">@Model.Overview.TotalOrders</div>
                         <div class="report-kpi-delta @OrdDeltaCss">
                             <span class="report-kpi-dot"></span>
@@ -289,7 +352,7 @@
             <div class="card-body py-2">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <div class="report-kpi-label">Doanh thu (pay_total)</div>
+                        <div class="report-kpi-label">Doanh thu ghi nhận (pay_total)</div>
                         <div class="fw-bold fs-5 text-success report-kpi-value">
                             @Model.Overview.TotalPayTotal.ToString("N0", CultureInfo.CurrentCulture) đ
                         </div>
@@ -315,7 +378,6 @@
         </div>
     </div>
 
-    @* Số period có đơn *@
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm report-kpi-card">
             <div class="card-body py-2">
@@ -325,7 +387,6 @@
         </div>
     </div>
 
-    @* Doanh thu TB/ngày *@
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm report-kpi-card">
             <div class="card-body py-2">
@@ -337,7 +398,6 @@
         </div>
     </div>
 
-    @* Tỷ lệ giảm giá *@
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm report-kpi-card">
             <div class="card-body py-2">
@@ -349,13 +409,12 @@
         </div>
     </div>
 
-    @* Online vs COD *@
     @if (hasProviderRows)
     {
         <div class="col-6 col-md-3">
             <div class="card border-0 shadow-sm report-kpi-card">
                 <div class="card-body py-2">
-                    <div class="report-kpi-label">Doanh thu Online</div>
+                    <div class="report-kpi-label">Doanh thu Online (đã giao/nhận)</div>
                     <div class="fw-bold fs-6 report-kpi-value">
                         @onlineAmount.ToString("N0", CultureInfo.CurrentCulture) đ
                     </div>
@@ -369,7 +428,7 @@
         <div class="col-6 col-md-3">
             <div class="card border-0 shadow-sm report-kpi-card">
                 <div class="card-body py-2">
-                    <div class="report-kpi-label">Tỷ lệ đơn Online</div>
+                    <div class="report-kpi-label">Tỷ lệ đơn Online (đã giao/nhận)</div>
                     <div class="fw-bold fs-6 report-kpi-value">
                         @onlineOrderShare.ToString("0.##", CultureInfo.CurrentCulture)% (@onlineOrders / @totalOrders đơn)
                     </div>
@@ -379,24 +438,128 @@
     }
 </div>
 
+@* ==== DÒNG TIỀN + PIPELINE ==== *@
+<div class="row g-3 mb-3">
+    <div class="col-12 col-lg-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-semibold">Dòng tiền (tiền vào) trong khoảng lọc</div>
+                        <div class="small text-muted">
+                            Online theo <code>paid_at</code>, COD theo <code>giao/nhận</code>
+                        </div>
+                    </div>
+                    <span class="badge bg-light text-muted border">Dòng tiền</span>
+                </div>
+
+                <div class="row g-2 mt-1">
+                    <div class="col-6">
+                        <div class="small text-muted">Online đã thu</div>
+                        <div class="fw-bold text-success">
+                            @cashOv.OnlineCashIn.ToString("N0", CultureInfo.CurrentCulture) đ
+                        </div>
+                        <div class="small text-muted">@cashOv.OnlineOrders đơn</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">COD đã thu</div>
+                        <div class="fw-bold">
+                            @cashOv.CodCashIn.ToString("N0", CultureInfo.CurrentCulture) đ
+                        </div>
+                        <div class="small text-muted">@cashOv.CodOrders đơn</div>
+                    </div>
+                    <div class="col-12">
+                        <hr class="my-2" />
+                        <div class="d-flex justify-content-between">
+                            <div class="small text-muted">Tổng tiền vào</div>
+                            <div class="fw-bold">
+                                @cashOv.TotalCashIn.ToString("N0", CultureInfo.CurrentCulture) đ
+                                <span class="small text-muted">(@cashOv.TotalOrders đơn)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (!hasCashRows)
+                {
+                    <div class="small text-muted mt-2">Không có dòng tiền trong khoảng lọc.</div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-semibold">Đơn đang xử lý (Pipeline)</div>
+                        <div class="small text-muted">Mốc tính đến: <strong>@pipeAsOfText</strong> (không bao gồm mốc này)</div>
+                    </div>
+                    <span class="badge bg-light text-muted border">Đơn đang xử lý</span>
+                </div>
+
+                <div class="row g-2 mt-1">
+                    <div class="col-4">
+                        <div class="small text-muted">COD chưa thu</div>
+                        <div class="fw-bold">
+                            @pipe.CodOutstandingAmount.ToString("N0", CultureInfo.CurrentCulture) đ
+                        </div>
+                        <div class="small text-muted">@pipe.CodOutstandingOrders đơn</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">Online chưa thanh toán</div>
+                        <div class="fw-bold text-warning">
+                            @pipe.OnlinePendingAmount.ToString("N0", CultureInfo.CurrentCulture) đ
+                        </div>
+                        <div class="small text-muted">@pipe.OnlinePendingOrders đơn</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">Online đã thanh toán (chưa giao)</div>
+                        <div class="fw-bold text-primary">
+                            @pipe.OnlinePrepaidAmount.ToString("N0", CultureInfo.CurrentCulture) đ
+                        </div>
+                        <div class="small text-muted">@pipe.OnlinePrepaidOrders đơn</div>
+                    </div>
+
+                    <div class="col-12">
+                        <hr class="my-2" />
+                        <div class="d-flex justify-content-between">
+                            <div class="small text-muted">Tổng đơn đang xử lý</div>
+                            <div class="fw-bold">
+                                @pipe.OpenAmount.ToString("N0", CultureInfo.CurrentCulture) đ
+                                <span class="small text-muted">(@pipe.OpenOrders đơn)</span>
+                            </div>
+                        </div>
+                        <div class="small text-muted">
+                            * “Đang xử lý” = chưa giao/nhận và chưa huỷ.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ==== AI ==== *@
 <div class="card mb-3" id="aiCard">
     <div class="card-body">
         <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="fw-semibold">AI Insights</div>
-            <span class="badge bg-light text-muted border">Beta</span>
+            <div class="fw-semibold">Phân tích AI</div>
+            <span class="badge bg-light text-muted border">Thử nghiệm</span>
         </div>
 
         <div class="d-flex gap-2 align-items-center mb-2">
             <button type="button" class="btn btn-outline-primary btn-sm" id="btnAiRun">
-                Phân tích AI
+                Chạy phân tích
             </button>
 
             <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAiForce" style="display:none;">
-                Chạy lại (bỏ cache)
+                Chạy lại (bỏ lưu tạm)
             </button>
 
             <div class="small text-muted" id="aiHint">
-                (Chỉ chạy khi bạn bấm nút. Kết quả được cache 10–30 phút.)
+                (Chỉ chạy khi bạn bấm nút. Kết quả được lưu tạm 10–30 phút.)
             </div>
         </div>
 
@@ -419,7 +582,6 @@
     </div>
 </div>
 
-
 @if (hasRows)
 {
     <div class="card mb-3 report-chart-card">
@@ -427,7 +589,7 @@
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <div>
                     <div class="report-section-title">Xu hướng theo thời gian</div>
-                    <h5 class="card-title mb-0">Doanh thu & số đơn</h5>
+                    <h5 class="card-title mb-0">Doanh thu & số đơn (đã giao/nhận)</h5>
                     <span class="badge report-badge-soft mt-1">
                         Nhóm theo: @(Model.GroupBy == "month" ? "Tháng" : "Ngày")
                     </span>
@@ -440,19 +602,90 @@
                              toDate   = Model.ToDate.ToString("yyyy-MM-dd"),
                              groupBy  = Model.GroupBy,
                              format   = "csv"
-                       })">Export CSV</a>
+                       })">Xuất CSV</a>
                     <a class="btn btn-outline-secondary"
                        href="@Url.Action("RevenueExport", "Reports", new {
                              fromDate = Model.FromDate.ToString("yyyy-MM-dd"),
                              toDate   = Model.ToDate.ToString("yyyy-MM-dd"),
                              groupBy  = Model.GroupBy,
                              format   = "excel"
-                       })">Export Excel</a>
+                       })">Xuất Excel</a>
                 </div>
             </div>
 
             <div style="max-height: 320px;">
                 <canvas id="revenueChart"></canvas>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==== BIỂU ĐỒ DÒNG TIỀN ==== *@
+@if (hasCashRows)
+{
+    <div class="card mb-3 report-chart-card">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                    <div class="report-section-title">Dòng tiền</div>
+                    <h5 class="card-title mb-0">Tiền vào (Online theo paid_at, COD theo giao/nhận)</h5>
+                    <span class="badge report-badge-soft mt-1">
+                        Nhóm theo: @(Model.GroupBy == "month" ? "Tháng" : "Ngày")
+                    </span>
+                </div>
+            </div>
+
+            <div style="max-height: 320px;">
+                <canvas id="cashflowChart"></canvas>
+            </div>
+        </div>
+    </div>
+}
+
+@* ==== BẢNG DÒNG TIỀN THEO KÊNH ==== *@
+@if (hasCashProviders)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0 small text-muted">Dòng tiền theo kênh thanh toán</h5>
+                <span class="badge bg-light text-muted border">Dựa trên “tiền vào” trong khoảng lọc</span>
+            </div>
+
+            <div class="cmstools-table-container">
+                <div class="cmstools-table-scroll">
+                    <table class="table table-sm table-bordered align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Kênh</th>
+                                <th class="text-end">Số đơn</th>
+                                <th class="text-end">Tiền vào</th>
+                                <th class="text-end">TB/đơn</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in cashProviders)
+                            {
+                                var prov = (p.ProviderLabel ?? "").Trim();
+                                var meth = (p.MethodLabel ?? "").Trim();
+                                var avg = p.SuccessfulOrders > 0 ? (p.TotalAmount / p.SuccessfulOrders) : 0m;
+
+                                <tr>
+                                    <td>
+                                        <strong>@(string.IsNullOrWhiteSpace(prov) ? "Không rõ" : prov)</strong>
+                                        @if (!string.IsNullOrWhiteSpace(meth) && !string.Equals(meth, prov, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <div class="small text-muted">@meth</div>
+                                        }
+                                    </td>
+                                    <td class="text-end">@p.SuccessfulOrders</td>
+                                    <td class="text-end fw-semibold">@p.TotalAmount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                    <td class="text-end">@avg.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -464,13 +697,13 @@
 }
 else
 {
-    @* ==== BẢNG THEO NGÀY/THÁNG ==== *@
+    @* ==== BẢNG THEO NGÀY/THÁNG (Doanh thu ghi nhận) ==== *@
     <div class="cmstools-table-container mb-3">
         <div class="cmstools-table-scroll">
             <table class="table table-striped table-sm table-bordered cmstools-table mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>@(Model.GroupBy == "month" ? "Tháng giao hàng" : "Ngày giao hàng")</th>
+                        <th>@(Model.GroupBy == "month" ? "Tháng giao/nhận" : "Ngày giao/nhận")</th>
                         <th class="text-end">Số đơn</th>
                         <th class="text-end">SubTotal</th>
                         <th class="text-end">Giảm giá</th>
@@ -491,17 +724,17 @@ else
                         if (Model.GroupBy == "month")
                         {
                             fromFilterDate = new DateTime(periodDate.Year, periodDate.Month, 1);
-                            toFilterDate   = fromFilterDate.AddMonths(1).AddDays(-1);
+                            toFilterDate = fromFilterDate.AddMonths(1).AddDays(-1);
                         }
                         else
                         {
                             fromFilterDate = periodDate;
-                            toFilterDate   = periodDate;
+                            toFilterDate = periodDate;
                         }
 
                         var drillUrl = Url.Action("Index", "Orders", new {
                             deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
-                            deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
+                            deliveredTo = toFilterDate.ToString("yyyy-MM-dd")
                         });
 
                         <tr class="@(isTop ? "table-warning" : "")">
@@ -536,9 +769,9 @@ else
                             <thead class="table-light">
                                 <tr>
                                     <th style="width:60px;">#</th>
-                                    <th>@(Model.GroupBy == "month" ? "Tháng giao hàng" : "Ngày giao hàng")</th>
+                                    <th>@(Model.GroupBy == "month" ? "Tháng giao/nhận" : "Ngày giao/nhận")</th>
                                     <th class="text-end">Số đơn</th>
-                                    <th class="text-end">Doanh thu (pay_total)</th>
+                                    <th class="text-end">Doanh thu</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -554,17 +787,17 @@ else
                                     if (Model.GroupBy == "month")
                                     {
                                         fromFilterDate = new DateTime(periodDate.Year, periodDate.Month, 1);
-                                        toFilterDate   = fromFilterDate.AddMonths(1).AddDays(-1);
+                                        toFilterDate = fromFilterDate.AddMonths(1).AddDays(-1);
                                     }
                                     else
                                     {
                                         fromFilterDate = periodDate;
-                                        toFilterDate   = periodDate;
+                                        toFilterDate = periodDate;
                                     }
 
                                     var drillUrl = Url.Action("Index", "Orders", new {
                                         deliveredFrom = fromFilterDate.ToString("yyyy-MM-dd"),
-                                        deliveredTo   = toFilterDate.ToString("yyyy-MM-dd")
+                                        deliveredTo = toFilterDate.ToString("yyyy-MM-dd")
                                     });
 
                                     <tr>
@@ -587,16 +820,16 @@ else
         </div>
     }
 
-    @* ==== Reconcile banner ==== *@
+    @* ==== Cảnh báo đối soát ==== *@
     @if (providersMismatch)
     {
         <div class="alert alert-warning d-flex justify-content-between align-items-start mb-3">
             <div>
-                <div class="fw-semibold">Cảnh báo đối soát kênh thanh toán</div>
+                <div class="fw-semibold">Cảnh báo đối soát theo kênh thanh toán (doanh thu ghi nhận)</div>
                 <div class="small">
                     Tổng theo kênh = <strong>@providersSumAmount.ToString("N0", CultureInfo.CurrentCulture) đ</strong>
                     / @providersSumOrders đơn,
-                    trong khi Overview = <strong>@totalRevenue.ToString("N0", CultureInfo.CurrentCulture) đ</strong>
+                    trong khi Tổng quan = <strong>@totalRevenue.ToString("N0", CultureInfo.CurrentCulture) đ</strong>
                     / @totalOrders đơn.
                 </div>
                 <div class="small text-muted">
@@ -605,19 +838,19 @@ else
                 </div>
             </div>
             <div class="small text-muted text-end">
-                Gợi ý: kiểm tra order có nhiều payment_transaction success / retry / duplicate.
+                Gợi ý: kiểm tra đơn có retry/duplicate giao dịch, hoặc mapping kênh chưa thống nhất.
             </div>
         </div>
     }
 
-    @* ==== TAB PHỤ: KÊNH THANH TOÁN ==== *@
+    @* ==== KÊNH THANH TOÁN (Doanh thu ghi nhận) ==== *@
     @if (hasProviderRows)
     {
         <div class="card mb-3">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h5 class="card-title mb-0 small text-muted">Phân bổ doanh thu theo kênh thanh toán</h5>
-                    <span class="badge bg-light text-muted border">Dựa trên các đơn trong khoảng lọc</span>
+                    <span class="badge bg-light text-muted border">Dựa trên đơn đã giao/nhận trong khoảng lọc</span>
                 </div>
 
                 <ul class="nav nav-tabs small" role="tablist">
@@ -658,7 +891,7 @@ else
                                                     <th>Kênh</th>
                                                     <th class="text-end">Số đơn</th>
                                                     <th class="text-end">Doanh thu</th>
-                                                    <th class="text-end">Giá trị TB/đơn</th>
+                                                    <th class="text-end">TB/đơn</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -692,7 +925,7 @@ else
                             </div>
                             <div class="col-12 col-lg-6">
                                 <p class="small text-muted mb-1">
-                                    Biểu đồ thể hiện tỷ lệ số đơn thành công theo từng kênh (COD / VNPAY / ZALOPAY...).
+                                    Biểu đồ thể hiện tỷ lệ số đơn theo từng kênh.
                                 </p>
                                 <ul class="small mb-0">
                                     @foreach (var p in providerRows)
@@ -705,6 +938,69 @@ else
                     </div>
                 </div>
 
+            </div>
+        </div>
+    }
+
+    @* ==== PIPELINE THEO TRẠNG THÁI ==== *@
+    @if (hasPipeRows)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="card-title mb-0 small text-muted">Đơn đang xử lý theo trạng thái</h5>
+                    <span class="badge bg-light text-muted border">Tính đến @pipeAsOfText</span>
+                </div>
+
+                <div class="cmstools-table-container">
+                    <div class="cmstools-table-scroll">
+                        <table class="table table-sm table-bordered align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:240px;">Trạng thái</th>
+                                    <th class="text-end">Số đơn</th>
+                                    <th class="text-end">Tổng tiền</th>
+                                    <th class="text-end">COD chưa thu</th>
+                                    <th class="text-end">Online chưa thanh toán</th>
+                                    <th class="text-end">Online đã thanh toán</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in pipeRows.OrderBy(x => x.Status))
+                                {
+                                    var stName = GetOrderStatusName(r.Status);
+                                    var badge = BadgeCssByStatus(r.Status);
+
+                                    <tr>
+                                        <td>
+                                            <span class="badge @badge me-2">@r.Status</span>
+                                            <span class="fw-semibold">@stName</span>
+                                        </td>
+                                        <td class="text-end">@r.OrderCount</td>
+                                        <td class="text-end fw-semibold">@r.Amount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                        <td class="text-end">@r.CodAmount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                        <td class="text-end">@r.OnlinePendingAmount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                        <td class="text-end">@r.OnlinePrepaidAmount.ToString("N0", CultureInfo.CurrentCulture) đ</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot class="table-light">
+                                <tr>
+                                    <th>Tổng</th>
+                                    <th class="text-end">@pipeRows.Sum(x => x.OrderCount)</th>
+                                    <th class="text-end">@pipeRows.Sum(x => x.Amount).ToString("N0", CultureInfo.CurrentCulture) đ</th>
+                                    <th class="text-end">@pipeRows.Sum(x => x.CodAmount).ToString("N0", CultureInfo.CurrentCulture) đ</th>
+                                    <th class="text-end">@pipeRows.Sum(x => x.OnlinePendingAmount).ToString("N0", CultureInfo.CurrentCulture) đ</th>
+                                    <th class="text-end">@pipeRows.Sum(x => x.OnlinePrepaidAmount).ToString("N0", CultureInfo.CurrentCulture) đ</th>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="small text-muted mt-2">
+                    Gợi ý: click vào biểu đồ “Doanh thu & số đơn” để drilldown danh sách đơn theo ngày/tháng.
+                </div>
             </div>
         </div>
     }
@@ -805,7 +1101,7 @@ else
                 setRange(range);
             });
 
-            // ===== Chart.js (trend) =====
+            // ===== Chart.js (Doanh thu ghi nhận) =====
             var hasRows = @hasRows.ToString().ToLower();
             var groupBy = "@Model.GroupBy";
 
@@ -849,8 +1145,8 @@ else
                         data: {
                             labels: labels,
                             datasets: [
-                                { type: "line", label: "Doanh thu (pay_total)", data: revenueData, yAxisID: "yRevenue", borderWidth: 2, tension: 0.3, pointRadius: 3 },
-                                { type: "bar",  label: "Số đơn",              data: ordersData,  yAxisID: "yOrders",  borderWidth: 1 }
+                                { type: "line", label: "Doanh thu (đ)", data: revenueData, yAxisID: "yRevenue", borderWidth: 2, tension: 0.3, pointRadius: 3 },
+                                { type: "bar",  label: "Số đơn",        data: ordersData,  yAxisID: "yOrders",  borderWidth: 1 }
                             ]
                         },
                         options: {
@@ -893,7 +1189,51 @@ else
                 }
             }
 
-            // ===== Biểu đồ kênh thanh toán =====
+            // ===== Biểu đồ dòng tiền =====
+            var hasCashRows = @hasCashRows.ToString().ToLower();
+            if (hasCashRows) {
+                const cLabels = @Html.Raw(cashLabelsJson);
+                const cOnline = @Html.Raw(cashOnlineJson);
+                const cCod    = @Html.Raw(cashCodJson);
+                const cTotal  = @Html.Raw(cashTotalJson);
+
+                const ctxC = document.getElementById("cashflowChart");
+                if (ctxC) {
+                    new Chart(ctxC, {
+                        type: "bar",
+                        data: {
+                            labels: cLabels,
+                            datasets: [
+                                { type: "line", label: "Online đã thu", data: cOnline, yAxisID: "yCash", borderWidth: 2, tension: 0.3, pointRadius: 3 },
+                                { type: "bar",  label: "COD đã thu",    data: cCod,    yAxisID: "yCash", borderWidth: 1 },
+                                { type: "line", label: "Tổng tiền vào", data: cTotal,  yAxisID: "yCash", borderWidth: 2, tension: 0.3, pointRadius: 0 }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: "index", intersect: false },
+                            scales: {
+                                yCash: { type: "linear", display: true, position: "left", title: { display: true, text: "Tiền vào (đ)" } },
+                                x: { ticks: { maxRotation: 45, minRotation: 0 } }
+                            },
+                            plugins: {
+                                legend: { display: true },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function (context) {
+                                            const v = context.parsed.y || 0;
+                                            return " " + context.dataset.label + ": " + v.toLocaleString("vi-VN") + " đ";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            // ===== Biểu đồ kênh thanh toán (doanh thu ghi nhận) =====
             var hasProviderRows = @hasProviderRows.ToString().ToLower();
             if (hasProviderRows) {
                 const providerLabels  = @Html.Raw(providerLabelsJson);
@@ -999,26 +1339,21 @@ else
       return;
     }
 
-    // show force button sau khi có kết quả
     btnForce.style.display = "inline-block";
 
-    // summary
     summaryEl.textContent = ai.summary || "";
     if (cached) {
-      // thêm hint nhỏ nếu muốn
       const span = document.createElement("span");
       span.className = "badge bg-light text-muted border ms-2";
-      span.textContent = "cache";
+      span.textContent = "đã lưu tạm";
       summaryEl.appendChild(span);
     }
 
-    // highlights
     if (ai.highlights && ai.highlights.length) {
       hiWrap.style.display = "block";
       hiUl.innerHTML = ai.highlights.map(x => `<li>${escapeHtml(x)}</li>`).join("");
     }
 
-    // alerts
     if (ai.alerts && ai.alerts.length) {
       alWrap.style.display = "block";
       alUl.innerHTML = ai.alerts.map(x => `<li>${escapeHtml(x)}</li>`).join("");
@@ -1057,12 +1392,8 @@ else
     }
   }
 
-  if (btnRun) {
-    btnRun.addEventListener("click", function () { runAi(false); });
-  }
-  if (btnForce) {
-    btnForce.addEventListener("click", function () { runAi(true); });
-  }
+  if (btnRun) btnRun.addEventListener("click", function () { runAi(false); });
+  if (btnForce) btnForce.addEventListener("click", function () { runAi(true); });
 
   function escapeHtml(s) {
     s = (s ?? "").toString();
@@ -1070,5 +1401,4 @@ else
   }
 })();
 </script>
-
 }

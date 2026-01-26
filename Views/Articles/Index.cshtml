@@ -14,7 +14,77 @@
     string tagSlug = (string)(ViewBag.TagSlug ?? "");
 }
 
-<div class="d-flex align-items-center justify-content-between mb-3">
+<style>
+    /* ===== Articles List Responsive ===== */
+    .articles-table {
+        table-layout: fixed;
+        width: 100%;
+    }
+
+        /* chống “dính chữ” header + cell khi cột bị bóp */
+        .articles-table th, .articles-table td {
+            overflow: hidden;
+            vertical-align: middle;
+        }
+
+        .articles-table thead th {
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+    /* Title: tối đa 2 dòng */
+    .title-clamp {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
+
+    /* Truncate 1 dòng */
+    .text-truncate-1 {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+        max-width: 100%;
+    }
+
+    code.slug-code {
+        font-size: .9rem;
+        padding: .15rem .35rem;
+    }
+
+    /* ✅ Hiển thị ĐUÔI slug (giữ phần cuối khác nhau) */
+    .slug-tail {
+        direction: rtl;
+        text-align: left; /* giữ cảm giác “căn trái” */
+        unicode-bidi: plaintext; /* tránh đảo ký tự lạ */
+    }
+
+    /* Link trong bảng nhìn gọn */
+    .row-link {
+        color: inherit;
+        text-decoration: none;
+    }
+
+        .row-link:hover {
+            text-decoration: underline;
+        }
+
+    @@media (max-width: 576px) {
+        .articles-toolbar .btn {
+            width: 100%;
+        }
+
+        .articles-toolbar h3 {
+            font-size: 1.15rem;
+        }
+    }
+</style>
+
+<div class="d-flex align-items-center justify-content-between mb-3 articles-toolbar">
     <h3 class="mb-0">Quản lý bài viết</h3>
     <a class="btn btn-primary" href="/Articles/Edit">+ Tạo bài viết</a>
 </div>
@@ -48,19 +118,26 @@
 </form>
 
 <div class="table-responsive">
-    <table class="table table-hover align-middle">
+    <table class="table table-hover align-middle articles-table">
         <thead>
             <tr>
-                <th style="width:80px">ID</th>
+                <th style="width:64px">ID</th>
                 <th>Tiêu đề</th>
-                <th style="width:240px">Slug</th>
-                <th style="width:120px">Trạng thái</th>
-                <th style="width:180px">Hẹn đăng (VN)</th>  @* ✅ thêm *@
-                <th style="width:140px">Trang chủ</th>
-                <th style="width:180px">Cập nhật (UTC)</th>
-                <th style="width:120px"></th>
+
+                <!-- Slug: chỉ hiện từ xl trở lên -->
+                <th class="d-none d-xl-table-cell" style="width:220px">Slug</th>
+
+                <th style="width:110px">Trạng thái</th>
+                <th style="width:160px">Hẹn đăng (VN)</th>
+
+                <!-- Ẩn Trang chủ trên < lg -->
+                <th class="d-none d-lg-table-cell" style="width:110px">Trang chủ</th>
+
+                <th style="width:160px">Cập nhật (VN)</th>
+                <th style="width:100px"></th>
             </tr>
         </thead>
+
         <tbody>
             @if (Model == null || Model.Count == 0)
             {
@@ -78,10 +155,31 @@
                         _ => "Nháp"
                     };
 
+                    var editUrl = $"/Articles/Edit/{a.Id}";
+
                     <tr>
                         <td>@a.Id</td>
-                        <td class="fw-semibold">@a.Title</td>
-                        <td><code>@a.Slug</code></td>
+
+                        <!-- ✅ Title clickable + slug tail dưới title khi < xl -->
+                        <td>
+                            <a class="fw-semibold title-clamp row-link" href="@editUrl" title="@a.Title">
+                                @a.Title
+                            </a>
+
+                            <div class="d-xl-none small text-muted text-truncate-1 mt-1">
+                                <a class="row-link" href="@editUrl" title="@a.Slug">
+                                    <code class="slug-code slug-tail">@a.Slug</code>
+                                </a>
+                            </div>
+                        </td>
+
+                        <!-- ✅ Slug tail ở cột riêng (xl+) -->
+                        <td class="d-none d-xl-table-cell">
+                            <a class="row-link" href="@editUrl" title="@a.Slug">
+                                <code class="slug-code text-truncate-1 slug-tail">@a.Slug</code>
+                            </a>
+                        </td>
+
                         <td>@statusText</td>
 
                         <td>
@@ -95,13 +193,15 @@
                             }
                         </td>
 
-                        <td>
+                        <td class="d-none d-lg-table-cell">
                             @(a.Is_Featured ? $"Có (#{a.Featured_Order?.ToString() ?? "-"})" : "Không")
                         </td>
+
                         <td>@a.Updated_At_Utc.AddHours(7).ToString("dd/MM/yyyy HH:mm")</td>
 
                         <td class="text-end">
-                            <a class="btn btn-sm btn-outline-primary" href="/Articles/Edit/@a.Id">Sửa</a>
+                            <!-- ✅ dễ phân biệt hơn -->
+                            <a class="btn btn-sm btn-outline-primary" href="@editUrl">Sửa #@a.Id</a>
                         </td>
                     </tr>
                 }
@@ -109,7 +209,6 @@
         </tbody>
     </table>
 </div>
-
 
 @if (totalPages > 1)
 {

@@ -10,6 +10,7 @@
             1 => "Đã xác nhận",
             2 => "Đang giao",
             3 => "Đã giao",
+            7 => "Đã nhận hàng",
             4 => "Đã huỷ",
             _ => "Không rõ"
         };
@@ -23,6 +24,7 @@
             1 => "badge bg-info",       // Đã xác nhận
             2 => "badge bg-primary",    // Đang giao
             3 => "badge bg-success",    // Đã giao
+            7 => "badge bg-success",    // Đã nhận hàng
             4 => "badge bg-danger",     // Đã huỷ
             _ => "badge bg-secondary"
         };
@@ -33,6 +35,7 @@
         return value.ToString("N0", vi) + " đ";
     }
 }
+
 
 @{
     ViewData["Title"] = "Đơn hàng " + Model.OrderCode;
@@ -139,34 +142,34 @@
                         <div class="col-md-4">
                             <label class="form-label small">Trạng thái mới</label>
                             <select name="newStatus" class="form-select form-select-sm">
-                                @* Giới hạn option theo trạng thái hiện tại *@
                                 @if (Model.Status == 0)
-                                {  @* Mới tạo *@
+                                {
                                     <option value="0" selected>Giữ nguyên - Mới tạo</option>
                                     <option value="1">Xác nhận đơn</option>
                                     <option value="4">Huỷ đơn</option>
                                 }
                                 else if (Model.Status == 1)
                                 {
-          @* Đã xác nhận *@
                                     <option value="1" selected>Giữ nguyên - Đã xác nhận</option>
                                     <option value="2">Đang giao</option>
                                     <option value="4">Huỷ đơn</option>
                                 }
                                 else if (Model.Status == 2)
                                 {
-          @* Đang giao *@
                                     <option value="2" selected>Giữ nguyên - Đang giao</option>
                                     <option value="3">Đã giao</option>
                                 }
                                 else if (Model.Status == 3)
                                 {
-          @* Đã giao *@
-                                    <option value="3" selected>Đã giao (không đổi)</option>
+                                    <option value="3" selected>Giữ nguyên - Đã giao</option>
+                                    <option value="7">Đã nhận hàng</option>
+                                }
+                                else if (Model.Status == 7)
+                                {
+                                    <option value="7" selected>Đã nhận hàng (không đổi)</option>
                                 }
                                 else if (Model.Status == 4)
                                 {
-          @* Đã huỷ *@
                                     <option value="4" selected>Đã huỷ (không đổi)</option>
                                 }
                                 else
@@ -174,6 +177,7 @@
                                     <option value="@Model.Status" selected>Giữ nguyên (@Model.Status)</option>
                                 }
                             </select>
+
                         </div>
 
                         <div class="col-md-8">
@@ -253,16 +257,30 @@ else
 }
 
 @section Scripts {
+    <!-- Nếu Layout chưa có bootstrap bundle thì bật dòng này -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
+        function cmsShowToast(msg, ok) {
+            const el = document.getElementById('cmsToast');
+            const body = document.getElementById('cmsToastBody');
+            if (!el || !body) return;
+
+            body.textContent = msg || (ok ? 'Đã cập nhật.' : 'Có lỗi xảy ra.');
+
+            // đổi màu theo trạng thái
+            el.classList.remove('text-bg-dark', 'text-bg-success', 'text-bg-danger');
+            el.classList.add(ok ? 'text-bg-success' : 'text-bg-danger');
+
+            const t = bootstrap.Toast.getOrCreateInstance(el, { delay: 1800 });
+            t.show();
+        }
+
         function cmsOrderStatusSubmit(form) {
-            if (!form.checkValidity()) {
-                return false;
-            }
+            if (!form.checkValidity()) return false;
 
             const submitBtn = form.querySelector('button[type="submit"]');
-            if (submitBtn) {
-                submitBtn.disabled = true;
-            }
+            if (submitBtn) submitBtn.disabled = true;
 
             const fd = new FormData(form);
             const url = form.action || '@Url.Action("ChangeStatus", "Orders")';
@@ -270,31 +288,53 @@ else
             fetch(url, {
                 method: 'POST',
                 body: fd,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(async (r) => {
+                let data = null;
+                try { data = await r.json(); } catch { }
+
+                if (!r.ok) {
+                    const msg = (data && (data.message || data.detail)) || 'Có lỗi khi cập nhật trạng thái.';
+                    cmsShowToast(msg, false);
+                    if (submitBtn) submitBtn.disabled = false;
+                    return;
+                }
+
+                const ok = !!(data && data.ok);
+                const msg = (data && data.message) ? data.message : (ok ? 'Đã cập nhật trạng thái.' : 'Không thể cập nhật.');
+
+                cmsShowToast(msg, ok);
+
+                if (ok) {
+                    // ✅ reload nhẹ để cập nhật badge + dropdown đúng trạng thái mới
+                    setTimeout(() => window.location.reload(), 700);
+                } else {
+                    if (submitBtn) submitBtn.disabled = false;
                 }
             })
-                .then(r => r.json())
-                .then(data => {
-                    if (data && data.message) {
-                        alert(data.message);
-                    }
-                    if (data && data.ok) {
-                        window.location.reload();
-                    } else if (submitBtn) {
-                        submitBtn.disabled = false;
-                    }
-                })
-                .catch(err => {
-                    console.error(err);
-                    alert('Có lỗi khi cập nhật trạng thái đơn hàng.');
-                    if (submitBtn) {
-                        submitBtn.disabled = false;
-                    }
-                });
+            .catch(err => {
+                console.error(err);
+                cmsShowToast('Có lỗi khi cập nhật trạng thái đơn hàng.', false);
+                if (submitBtn) submitBtn.disabled = false;
+            });
 
-            // Chặn submit form mặc định
-            return false;
+            return false; // chặn submit thường
         }
     </script>
 }
+
+<!-- ✅ Toast (Bootstrap 5) -->
+<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 99999;">
+    <div id="cmsToast"
+         class="toast align-items-center text-bg-dark border-0"
+         role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="cmsToastBody">
+                ...
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                    data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>

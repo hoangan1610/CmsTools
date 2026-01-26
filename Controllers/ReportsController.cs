@@ -95,7 +95,6 @@ namespace CmsTools.Controllers
 
         private string GetTenantKey()
         {
-            // Tuỳ hệ thống bạn, bổ sung claim type ở đây
             var tenant =
                 GetClaimOrEmpty(User, "tenant_id", "TenantId", "tenant", "shop_id", "ShopId", "ClientId");
 
@@ -115,8 +114,6 @@ namespace CmsTools.Controllers
 
         private static string BuildFiltersKey(Microsoft.AspNetCore.Http.IQueryCollection q)
         {
-            // Lấy hết querystring làm "filters" (trừ các key không liên quan nếu muốn)
-            // Bạn có thể loại thêm các key như "page", "format"... tuỳ dự án
             var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 // "format", "page"
@@ -139,10 +136,8 @@ namespace CmsTools.Controllers
 
         private string BuildRevenueAiCacheKey(DateTime from, DateTime to, string groupBy)
         {
-            // key bao gồm: tenant + user + range + groupBy + toàn bộ filters
             var tenantKey = GetTenantKey();
             var userKey = GetUserKey();
-
             var filtersKey = BuildFiltersKey(Request.Query);
 
             return $"rev-ai|{tenantKey}|{userKey}|from:{from:yyyyMMdd}|to:{to:yyyyMMdd}|gb:{groupBy}|q:{filtersKey}";
@@ -150,7 +145,6 @@ namespace CmsTools.Controllers
 
         private MemoryCacheEntryOptions BuildAiCacheOptions()
         {
-            // 10–30 phút, default 20
             var minutes = _cfg.GetValue<int?>("Reports:RevenueAi:CacheMinutes") ?? 20;
             if (minutes < 10) minutes = 10;
             if (minutes > 30) minutes = 30;
@@ -173,7 +167,9 @@ namespace CmsTools.Controllers
             await using var conn = new SqlConnection(_hafConn);
             await conn.OpenAsync(ct);
 
-            // ----- Kỳ hiện tại -----
+            // ======================================
+            // A) Revenue recognized (delivered)
+            // ======================================
             var p = new DynamicParameters();
             p.Add("@from_date", from);
             p.Add("@to_date", to);
@@ -187,7 +183,9 @@ namespace CmsTools.Controllers
                 vm.Providers = (await multi.ReadAsync<RevenueByProviderRow>()).ToList();
             }
 
-            // ----- Kỳ trước -----
+            // ======================================
+            // B) Previous period (for delta)
+            // ======================================
             var daysSpan = (int)((to - from).TotalDays + 1);
             if (daysSpan < 1) daysSpan = 1;
 
@@ -205,7 +203,6 @@ namespace CmsTools.Controllers
                 vm.PreviousOverview = await multiPrev.ReadFirstOrDefaultAsync<RevenueOverview>() ?? new RevenueOverview();
             }
 
-            // % thay đổi
             vm.RevenueChangePercent = (vm.PreviousOverview.TotalPayTotal > 0)
                 ? (vm.Overview.TotalPayTotal - vm.PreviousOverview.TotalPayTotal) * 100m / vm.PreviousOverview.TotalPayTotal
                 : (vm.Overview.TotalPayTotal > 0 ? 100m : 0m);
@@ -213,6 +210,36 @@ namespace CmsTools.Controllers
             vm.OrdersChangePercent = (vm.PreviousOverview.TotalOrders > 0)
                 ? (vm.Overview.TotalOrders - vm.PreviousOverview.TotalOrders) * 100m / vm.PreviousOverview.TotalOrders
                 : (vm.Overview.TotalOrders > 0 ? 100m : 0m);
+
+            // ======================================
+            // C) Cash-in (paid_at for online, delivered/received for COD)
+            // Proc returns 3 result sets:
+            //   (1) overview, (2) rows by period, (3) providers breakdown
+            // ======================================
+            using (var multiCash = await conn.QueryMultipleAsync(
+                "dbo.usp_report_cashflow", p, commandType: CommandType.StoredProcedure))
+            {
+                vm.CashflowOverview = await multiCash.ReadFirstOrDefaultAsync<CashflowOverview>() ?? new CashflowOverview();
+                vm.CashflowRows = (await multiCash.ReadAsync<CashflowByPeriodRow>()).ToList();
+                vm.CashflowProviders = (await multiCash.ReadAsync<CashflowByProviderRow>()).ToList();
+            }
+
+            // ======================================
+            // D) Pipeline snapshot (open orders)
+            // as_of_excl = end of ToDate (00:00 of next day)
+            // Proc returns 2 result sets:
+            //   (1) snapshot, (2) breakdown by status
+            // ======================================
+            var asOfExcl = to.Date.AddDays(1);
+            var pPipe = new DynamicParameters();
+            pPipe.Add("@as_of_excl", asOfExcl);
+
+            using (var multiPipe = await conn.QueryMultipleAsync(
+                "dbo.usp_report_pipeline_snapshot", pPipe, commandType: CommandType.StoredProcedure))
+            {
+                vm.Pipeline = await multiPipe.ReadFirstOrDefaultAsync<PipelineSnapshot>() ?? new PipelineSnapshot();
+                vm.PipelineByStatus = (await multiPipe.ReadAsync<PipelineByStatusRow>()).ToList();
+            }
 
             // Không chạy AI ở đây
             vm.Ai = null;
@@ -239,9 +266,7 @@ namespace CmsTools.Controllers
         }
 
         // ===========================
-        // 2) API: RevenueAi (chỉ chạy khi user bấm nút)
-        // - Có cache 10–30 phút theo key (tenant+user+range+gb+filters)
-        // - force=true để bỏ cache (nếu user muốn chạy lại)
+        // 2) API: RevenueAi
         // ===========================
         [HttpGet]
         public async Task<IActionResult> RevenueAi(DateTime fromDate, DateTime toDate, string? groupBy, bool force = false)
@@ -256,15 +281,9 @@ namespace CmsTools.Controllers
 
             if (!force && _cache.TryGetValue(cacheKey, out RevenueAiInsightResult cached) && cached != null)
             {
-                return Ok(new
-                {
-                    ok = true,
-                    cached = true,
-                    data = cached
-                });
+                return Ok(new { ok = true, cached = true, data = cached });
             }
 
-            // Giới hạn thời gian AI (mặc định 3 phút)
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted);
             var timeoutSec = _cfg.GetValue<int?>("Reports:RevenueAi:TimeoutSeconds") ?? 180;
             if (timeoutSec < 30) timeoutSec = 30;
@@ -273,10 +292,8 @@ namespace CmsTools.Controllers
 
             try
             {
-                // rebuild vm để có dữ liệu đúng filter hiện tại
                 var vm = await BuildRevenueVmAsync(from, to, gb, cts.Token);
 
-                // Nếu không có dữ liệu thì khỏi gọi AI
                 if (vm.Rows == null || vm.Rows.Count == 0)
                 {
                     var empty = new RevenueAiInsightResult
@@ -294,44 +311,20 @@ namespace CmsTools.Controllers
 
                 if (ai == null)
                 {
-                    return Ok(new
-                    {
-                        ok = false,
-                        cached = false,
-                        message = "AI timeout hoặc bị huỷ.",
-                        data = (RevenueAiInsightResult?)null
-                    });
+                    return Ok(new { ok = false, cached = false, message = "AI timeout hoặc bị huỷ.", data = (RevenueAiInsightResult?)null });
                 }
 
                 _cache.Set(cacheKey, ai, BuildAiCacheOptions());
-
-                return Ok(new
-                {
-                    ok = true,
-                    cached = false,
-                    data = ai
-                });
+                return Ok(new { ok = true, cached = false, data = ai });
             }
             catch (OperationCanceledException)
             {
-                return Ok(new
-                {
-                    ok = false,
-                    cached = false,
-                    message = "AI timeout hoặc người dùng huỷ request.",
-                    data = (RevenueAiInsightResult?)null
-                });
+                return Ok(new { ok = false, cached = false, message = "AI timeout hoặc người dùng huỷ request.", data = (RevenueAiInsightResult?)null });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "RevenueAi failed");
-                return Ok(new
-                {
-                    ok = false,
-                    cached = false,
-                    message = "AI gặp lỗi.",
-                    data = (RevenueAiInsightResult?)null
-                });
+                return Ok(new { ok = false, cached = false, message = "AI gặp lỗi.", data = (RevenueAiInsightResult?)null });
             }
         }
 

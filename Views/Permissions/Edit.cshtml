@@ -60,8 +60,66 @@
         </small>
     </div>
 
+    @* ===== Preset theo chức năng + Search ===== *@
+    <div class="card mb-2">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-center">
+                <div class="col-12 col-lg-6">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text">Chức năng</span>
+                        <select id="permPreset" class="form-select">
+                            <option value="">-- Chọn preset --</option>
+                            <option value="orders_ops">Vận hành đơn hàng (kiểm tra/đổi trạng thái)</option>
+                            <option value="reviews_cskh">CSKH / Review (duyệt + phản hồi)</option>
+                            <option value="articles_cms">Quản lý bài viết (CMS)</option>
+                            <option value="products_catalog">Quản lý sản phẩm (catalog)</option>
+                            <option value="promotions">Quản lý khuyến mãi</option>
+                            <option value="loyalty_game">Loyalty / Game / Mission</option>
+                            <option value="reports_view">Báo cáo / Tracking (chỉ xem)</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-primary" id="btnPresetMerge">
+                            Áp dụng (Tick thêm)
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" id="btnPresetReplace">
+                            Reset theo preset
+                        </button>
+                    </div>
+
+                    <div class="mt-1">
+                        <small class="text-muted" id="presetHint">
+                            Chọn preset để tự tick các bảng liên quan. “Tick thêm” sẽ không gỡ quyền đang có.
+                        </small>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-6">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-12 col-md-8">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">Tìm bảng</span>
+                                <input id="permSearch"
+                                       type="text"
+                                       class="form-control"
+                                       placeholder="vd: orders, review, article..."
+                                       autocomplete="off" />
+                                <button class="btn btn-outline-secondary" type="button" id="permSearchClear" title="Xoá tìm kiếm">
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-auto ms-md-auto">
+                            <small class="text-muted">
+                                Hiển thị: <strong id="permCountShown">0</strong>/<strong id="permCountTotal">0</strong>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="table-responsive">
-        <table class="table table-sm table-bordered align-middle">
+        <table class="table table-sm table-bordered align-middle" id="permTable">
             <thead class="table-light">
                 <tr>
                     <th style="width:60px;">#</th>
@@ -106,7 +164,9 @@
                 @for (int i = 0; i < Model.Items.Count; i++)
                 {
                     var item = Model.Items[i];
-                    <tr>
+                    var searchKey = $"{item.ConnectionName} {item.DisplayName} {item.TableName}".ToLowerInvariant();
+
+                    <tr data-search="@searchKey" data-table-id="@item.TableId">
                         <td>@(i + 1)</td>
 
                         <td>@item.ConnectionName</td>
@@ -146,7 +206,7 @@
                         </td>
 
                         <td>
-                            <input class="form-control form-control-sm"
+                            <input class="form-control form-control-sm js-row-filter"
                                    asp-for="Items[@i].RowFilter"
                                    placeholder="vd: status <> 0" />
                         </td>
@@ -167,6 +227,21 @@
 
     <script>
         (function () {
+
+            // ====== Helpers ======
+            function qs(root, sel) { return (root || document).querySelector(sel); }
+            function qsa(root, sel) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+            function setChecked(el, v) {
+                if (!el || el.disabled) return;
+                el.checked = !!v;
+            }
+            function setValue(el, v) {
+                if (!el || el.disabled) return;
+                el.value = v == null ? "" : String(v);
+            }
+
+            // ====== Column "select all" ======
             function setAll(selector, checked) {
                 document.querySelectorAll(selector).forEach(function (el) {
                     if (!el.disabled) el.checked = checked;
@@ -194,6 +269,259 @@
                     setAll(sel, hdr.checked);
                 });
             });
+
+            // ====== Search filter rows ======
+            var input = document.getElementById("permSearch");
+            var btnClear = document.getElementById("permSearchClear");
+            var table = document.getElementById("permTable");
+            var shownEl = document.getElementById("permCountShown");
+            var totalEl = document.getElementById("permCountTotal");
+
+            if (!table) return;
+
+            var rows = qsa(table, "tbody tr");
+            totalEl.textContent = String(rows.length);
+
+            function normalize(s) {
+                return (s || "").toString().trim().toLowerCase();
+            }
+
+            function applyFilter() {
+                var q = normalize(input && input.value);
+                var shown = 0;
+
+                rows.forEach(function (tr) {
+                    var key = tr.getAttribute("data-search") || "";
+                    var ok = !q || key.indexOf(q) !== -1;
+
+                    tr.style.display = ok ? "" : "none";
+                    if (ok) shown++;
+                });
+
+                shownEl.textContent = String(shown);
+            }
+
+            if (input) input.addEventListener("input", applyFilter);
+            if (btnClear) {
+                btnClear.addEventListener("click", function () {
+                    if (input) input.value = "";
+                    applyFilter();
+                    if (input) input.focus();
+                });
+            }
+            applyFilter();
+
+            // ====== Preset data (theo TableId bạn gửi) ======
+            // Mỗi table: { view, create, update, delete, publish, schedule, archive, rowFilter }
+            var PRESETS = {
+                // Vận hành đơn hàng
+                orders_ops: {
+                    hint: "Orders: xem + cập nhật trạng thái; các bảng liên quan chỉ xem.",
+                    tables: {
+                        "14": { view: 1, update: 1 },  // tbl_orders
+                        "13": { view: 1 },             // tbl_order_item
+                        "17": { view: 1 },             // tbl_payment_transaction
+                        "26": { view: 1 },             // tbl_user_info
+                        "4":  { view: 1 },             // tbl_address
+                        "15": { view: 1 },             // Tbl_OrderStatus
+                        "40": { view: 1 },             // tbl_shipping_rule (tuỳ)
+                        "41": { view: 1 },             // tbl_shipping_zone (tuỳ)
+                        "42": { view: 1 }              // tbl_shipping_zone_area (tuỳ)
+                    }
+                },
+
+                // CSKH/Review
+                reviews_cskh: {
+                    hint: "Review: xem + duyệt/ẩn + phản hồi. Các bảng media/summary chỉ xem.",
+                    tables: {
+                        "37": { view: 1, update: 1 },         // tbl_product_review
+                        "44": { view: 1, create: 1, update: 1 }, // tbl_product_review_reply
+                        "36": { view: 1 },                    // tbl_product_rating_summary
+                        "38": { view: 1 },                    // tbl_product_review_media
+                        "43": { view: 1 },                    // tbl_product_review_image
+                        "18": { view: 1 },                    // tbl_product_info
+                        "26": { view: 1 }                     // tbl_user_info
+                    }
+                },
+
+                // Quản lý bài viết
+                articles_cms: {
+                    hint: "Bài viết: CRUD + Publish/Schedule/Archive trên tbl_article; các map/category/tag CRUD; analytics chỉ xem.",
+                    tables: {
+                        "50": { view: 1, create: 1, update: 1, delete: 1, publish: 1, schedule: 1, archive: 1 }, // tbl_article
+                        "51": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_category
+                        "57": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_tag
+                        "52": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_category_map
+                        "58": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_tag_map
+                        "54": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_product_map
+                        "56": { view: 1, create: 1, update: 1, delete: 1 }, // tbl_article_slug_redirect
+                        "60": { view: 1 }, // tbl_article_revision
+                        "59": { view: 1 }, // tbl_article_view_daily
+                        "61": { view: 1 }, // tbl_article_view_unique_daily
+                        "53": { view: 1 }, // tbl_article_product_click_daily
+                        "55": { view: 1 }  // tbl_article_search_text
+                    }
+                },
+
+                // Quản lý sản phẩm
+                products_catalog: {
+                    hint: "Sản phẩm: CRUD danh mục/sản phẩm/biến thể/tag; flash-sale tuỳ; lịch sử giá chỉ xem.",
+                    tables: {
+                        "1":  { view: 1, create: 1, update: 1 },             // tbl_product_category
+                        "18": { view: 1, create: 1, update: 1 },             // tbl_product_info
+                        "19": { view: 1, create: 1, update: 1 },             // tbl_product_variant
+                        "24": { view: 1, create: 1, update: 1 },             // Tbl_Tags
+                        "28": { view: 1, create: 1, update: 1 },             // tbl_variant_price_override
+                        "27": { view: 1 },                                   // tbl_variant_price_counter
+                        "23": { view: 1 }                                    // Tbl_Provinces (nếu dùng trong UI)
+                    }
+                },
+
+                // Khuyến mãi
+                promotions: {
+                    hint: "Khuyến mãi: CRUD promotion/scope/issue; log chỉ xem.",
+                    tables: {
+                        "20": { view: 1, create: 1, update: 1 }, // tbl_promotion
+                        "22": { view: 1, create: 1, update: 1 }, // tbl_promotion_scope
+                        "39": { view: 1, create: 1, update: 1 }, // tbl_promotion_issue
+                        "21": { view: 1 },                       // tbl_promotion_log
+                        "25": { view: 1 }                        // tbl_tracking_user (tuỳ)
+                    }
+                },
+
+                // Loyalty / Game / Mission
+                loyalty_game: {
+                    hint: "Loyalty/Mission/Game: danh mục phần thưởng CRUD; log/txn chủ yếu xem; config game tuỳ vận hành.",
+                    tables: {
+                        "34": { view: 1 },                         // tbl_loyalty_account
+                        "35": { view: 1 },                         // tbl_loyalty_txn
+                        "45": { view: 1, create: 1, update: 1 },   // tbl_loyalty_redemption
+                        "46": { view: 1, create: 1, update: 1 },   // tbl_loyalty_reward
+                        "47": { view: 1, create: 1, update: 1 },   // tbl_loyalty_reward_catalog
+                        "48": { view: 1, create: 1, update: 1 },   // tbl_mission
+                        "49": { view: 1 },                         // tbl_mission_user_log
+                        "29": { view: 1, create: 1, update: 1 },   // tbl_gam_checkin
+                        "30": { view: 1, create: 1, update: 1 },   // tbl_gam_spin_config
+                        "31": { view: 1, create: 1, update: 1 },   // tbl_gam_spin_config_item
+                        "32": { view: 1 },                         // tbl_gam_spin_result
+                        "33": { view: 1 }                          // tbl_gam_spin_turn
+                    }
+                },
+
+                // Báo cáo / Tracking chỉ xem
+                reports_view: {
+                    hint: "Chỉ xem dữ liệu tracking/báo cáo/log.",
+                    tables: {
+                        "25": { view: 1 }, // tbl_tracking_user
+                        "10": { view: 1 }, // tbl_login_history
+                        "21": { view: 1 }, // tbl_promotion_log
+                        "35": { view: 1 }, // tbl_loyalty_txn
+                        "59": { view: 1 }, // tbl_article_view_daily
+                        "61": { view: 1 }, // tbl_article_view_unique_daily
+                        "53": { view: 1 }  // tbl_article_product_click_daily
+                    }
+                }
+            };
+
+            // ====== Build map TableId -> row ======
+            var rowMap = {};
+            rows.forEach(function (tr) {
+                var id = tr.getAttribute("data-table-id");
+                if (id) rowMap[String(id)] = tr;
+            });
+
+            function applyTableRule(tr, rule, mode) {
+                if (!tr || !rule) return;
+
+                var view = qs(tr, ".js-col-view");
+                var create = qs(tr, ".js-col-create");
+                var update = qs(tr, ".js-col-update");
+                var del = qs(tr, ".js-col-delete");
+                var publish = qs(tr, ".js-col-publish");
+                var schedule = qs(tr, ".js-col-schedule");
+                var archive = qs(tr, ".js-col-archive");
+                var rf = qs(tr, ".js-row-filter");
+
+                function setField(el, val) {
+                    if (val == null) return;
+                    if (mode === "merge") {
+                        if (val) setChecked(el, true);
+                    } else {
+                        setChecked(el, !!val);
+                    }
+                }
+
+                setField(view, rule.view);
+                setField(create, rule.create);
+                setField(update, rule.update);
+                setField(del, rule.delete);
+                setField(publish, rule.publish);
+                setField(schedule, rule.schedule);
+                setField(archive, rule.archive);
+
+                if (rule.rowFilter != null) {
+                    if (mode === "merge") {
+                        // merge: chỉ set khi đang trống
+                        if (rf && !String(rf.value || "").trim()) setValue(rf, rule.rowFilter);
+                    } else {
+                        setValue(rf, rule.rowFilter);
+                    }
+                }
+            }
+
+            function clearAll() {
+                rows.forEach(function (tr) {
+                    setChecked(qs(tr, ".js-col-view"), false);
+                    setChecked(qs(tr, ".js-col-create"), false);
+                    setChecked(qs(tr, ".js-col-update"), false);
+                    setChecked(qs(tr, ".js-col-delete"), false);
+                    setChecked(qs(tr, ".js-col-publish"), false);
+                    setChecked(qs(tr, ".js-col-schedule"), false);
+                    setChecked(qs(tr, ".js-col-archive"), false);
+                    setValue(qs(tr, ".js-row-filter"), "");
+                });
+            }
+
+            function applyPreset(mode) {
+                var sel = document.getElementById("permPreset");
+                if (!sel || !sel.value) return;
+
+                var preset = PRESETS[sel.value];
+                if (!preset) return;
+
+                if (mode === "replace") {
+                    clearAll();
+                }
+
+                var tables = preset.tables || {};
+                Object.keys(tables).forEach(function (tableId) {
+                    var tr = rowMap[String(tableId)];
+                    applyTableRule(tr, tables[tableId], mode === "merge" ? "merge" : "replace");
+                });
+            }
+
+            // ====== UI events ======
+            var presetSel = document.getElementById("permPreset");
+            var hintEl = document.getElementById("presetHint");
+            var btnMerge = document.getElementById("btnPresetMerge");
+            var btnReplace = document.getElementById("btnPresetReplace");
+
+            if (presetSel) {
+                presetSel.addEventListener("change", function () {
+                    var p = PRESETS[presetSel.value];
+                    if (hintEl) {
+                        hintEl.textContent = p ? p.hint : "Chọn preset để tự tick các bảng liên quan. “Tick thêm” sẽ không gỡ quyền đang có.";
+                    }
+                });
+            }
+
+            if (btnMerge) btnMerge.addEventListener("click", function () { applyPreset("merge"); });
+            if (btnReplace) btnReplace.addEventListener("click", function () {
+                if (!presetSel || !presetSel.value) return;
+                var ok = confirm("Reset theo preset sẽ xoá toàn bộ tick hiện tại và áp dụng đúng theo preset. Tiếp tục?");
+                if (ok) applyPreset("replace");
+            });
+
         })();
     </script>
 }

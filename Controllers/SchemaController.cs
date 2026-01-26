@@ -27,30 +27,95 @@ namespace CmsTools.Controllers
 
         private IDbConnection OpenMeta() => new SqlConnection(_metaConn);
 
-        // ===== 1) INDEX: danh sách bảng theo connection =====
-
+        // ===== 1) INDEX: danh sách bảng theo connection (có filter connectionId) =====
         [HttpGet]
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> Index(int? connectionId)
         {
-            const string sql = @"
+            await using var meta = new SqlConnection(_metaConn);
+
+            // 1) Lấy tất cả connections (để vẫn hiện connection dù chưa có tbl_cms_table)
+            var conns = (await meta.QueryAsync<ConnectionInfo>(@"
+SELECT 
+    id          AS Id,
+    name        AS Name,
+    provider    AS Provider,
+    conn_string AS ConnString,
+    is_active   AS IsActive
+FROM dbo.tbl_cms_connection
+ORDER BY name;")).ToList();
+
+            if (connectionId.HasValue)
+            {
+                conns = conns.Where(x => x.Id == connectionId.Value).ToList();
+                if (conns.Count == 0)
+                {
+                    TempData["SchemaMessage"] = "Không tìm thấy connection.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
+            // 2) Lấy tables thuộc các connection đang hiển thị
+            var connIds = conns.Select(x => x.Id).ToArray();
+
+            var tables = new List<CmsTableMeta>();
+            if (connIds.Length > 0)
+            {
+                tables = (await meta.QueryAsync<CmsTableMeta>(@"
 SELECT 
     t.id                AS Id,
     t.connection_id     AS ConnectionId,
-    c.name              AS ConnectionName,
     t.schema_name       AS SchemaName,
     t.table_name        AS TableName,
     t.display_name      AS DisplayName,
     t.primary_key       AS PrimaryKey,
-    t.custom_detail_url AS CustomDetailUrl
+    t.custom_detail_url AS CustomDetailUrl,
+    t.is_view           AS IsView,
+    t.is_enabled        AS IsEnabled,
+    t.sort_order        AS SortOrder,
+    t.row_filter        AS RowFilter
 FROM dbo.tbl_cms_table t
-JOIN dbo.tbl_cms_connection c ON c.id = t.connection_id
-ORDER BY c.name, t.schema_name, t.table_name;";
+WHERE t.connection_id IN @connIds
+ORDER BY t.connection_id, t.schema_name, t.table_name;",
+                    new { connIds })).ToList();
+            }
 
-            await using var conn = new SqlConnection(_metaConn);
-            var rows = (await conn.QueryAsync<CmsTableListItem>(sql)).ToList();
+            // 3) Build ViewModel Items = connection + list tables
+            var items = new List<SchemaIndexViewModel.ConnectionWithTables>();
 
-            return View(rows);
+            foreach (var c in conns)
+            {
+                var connMeta = new CmsConnectionMeta
+                {
+                    Id = c.Id,
+                    Name = c.Name,
+                    Provider = c.Provider,
+                    ConnString = c.ConnString,
+                    IsActive = c.IsActive
+                };
+
+                var tlist = tables
+                    .Where(x => x.ConnectionId == c.Id)
+                    .OrderBy(x => x.SchemaName)
+                    .ThenBy(x => x.TableName)
+                    .ToList();
+
+                items.Add(new SchemaIndexViewModel.ConnectionWithTables
+                {
+                    Connection = connMeta,
+                    Tables = tlist
+                });
+            }
+
+            var vm = new SchemaIndexViewModel
+            {
+                Items = items
+            };
+
+            ViewBag.SelectedConnectionId = connectionId; // optional nếu bạn muốn highlight
+            return View(vm);
         }
+
+
 
 
         // ===== 2) COLUMNS: cấu hình cột cho 1 bảng =====

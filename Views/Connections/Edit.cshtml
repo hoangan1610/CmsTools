@@ -1,57 +1,149 @@
-﻿@model CmsTools.Models.CmsConnectionEditModel
+﻿@model IEnumerable<CmsTools.Models.CmsTableListItem>
+@using CmsTools.Controllers
 
 @{
-    ViewData["Title"] = Model.Id == null
-        ? "Thêm connection"
-        : $"Sửa connection #{Model.Id}";
+    ViewData["Title"] = "Schema";
+    var conns = ViewBag.Connections as List<dynamic>; // hoặc List<ConnectionInfo> nếu bạn public class ra ngoài
+    int? selectedId = ViewBag.SelectedConnectionId as int?;
+    var rows = Model?.ToList() ?? new List<CmsTools.Models.CmsTableListItem>();
 }
 
-<h2 class="mt-3 mb-3">@ViewData["Title"]</h2>
+<h2 class="mt-3 mb-3">Schema</h2>
 
-<form asp-controller="Connections" asp-action="Edit" method="post">
-    @Html.AntiForgeryToken()
+@if (TempData["SchemaMessage"] is string msg && !string.IsNullOrWhiteSpace(msg))
+{
+    <div class="alert alert-info">@msg</div>
+}
 
-    @if (Model.Id != null && Model.Id > 0)
+<div class="mb-3">
+    <div class="input-group" style="max-width:720px;">
+        <span class="input-group-text">Tìm bảng</span>
+        <input id="schemaSearch" class="form-control" placeholder="Nhập tên bảng... (vd: orders, review, article, tbl_)" />
+        <button id="schemaClear" class="btn btn-outline-secondary" type="button">X</button>
+    </div>
+    <small class="text-muted">Lọc theo: schema / table_name / display_name</small>
+</div>
+
+@if (conns == null || conns.Count == 0)
+{
+    <p class="text-muted">Chưa có connection nào.</p>
+}
+else
+{
+    foreach (var c in conns)
     {
-        <input type="hidden" asp-for="Id" />
+        // lấy tables theo connection này
+        var list = rows.Where(x => (int)x.ConnectionId == (int)c.Id).ToList();
+
+        <div class="card mb-4 schema-conn-card" data-conn-id="@c.Id">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>@c.Name</strong>
+                    <small class="text-muted ms-2">(ConnectionId = @c.Id)</small>
+                </div>
+
+                <form asp-controller="Schema" asp-action="Scan" method="post" class="mb-0">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="connectionId" value="@c.Id" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary">
+                        Scan schema (INFORMATION_SCHEMA)
+                    </button>
+                </form>
+            </div>
+
+            <div class="card-body p-2">
+                @if (list.Count == 0)
+                {
+                    <div class="text-muted p-2">
+                        Connection này chưa có bảng trong <code>tbl_cms_table</code>. Bấm <strong>Scan schema</strong> để nạp.
+                    </div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle mb-0 schema-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:60px;">ID</th>
+                                    <th>Schema</th>
+                                    <th>Tên bảng</th>
+                                    <th>Tên hiển thị</th>
+                                    <th>Primary key</th>
+                                    <th>Custom detail URL</th>
+                                    <th style="width:260px;">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var t in list.OrderBy(x => x.SchemaName).ThenBy(x => x.TableName))
+                                {
+                                    var display = string.IsNullOrWhiteSpace(t.DisplayName) ? "(chưa đặt)" : t.DisplayName;
+
+                                    <tr class="schema-row"
+                                        data-search="@($"{t.SchemaName} {t.TableName} {t.DisplayName}".ToLowerInvariant())">
+                                        <td>@t.Id</td>
+                                        <td>@t.SchemaName</td>
+                                        <td>@t.TableName</td>
+                                        <td>@display</td>
+                                        <td>@(t.PrimaryKey ?? "")</td>
+                                        <td>
+                                            @if (!string.IsNullOrWhiteSpace(t.CustomDetailUrl))
+                                            {
+                                                <code>@t.CustomDetailUrl</code>
+                                            }
+                                            else
+                                            {
+
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <a class="btn btn-sm btn-outline-secondary me-2"
+                                               href="@Url.Action("Columns", "Schema", new { tableId = t.Id })">
+                                                Cấu hình cột
+                                            </a>
+
+                                            <a class="btn btn-sm btn-outline-primary me-2"
+                                               href="@Url.Action("List", "Data", new { tableId = t.Id })"
+                                               target="_blank">
+                                                Xem dữ liệu
+                                            </a>
+
+                                            @if (!string.IsNullOrWhiteSpace(t.CustomDetailUrl))
+                                            {
+                                                var sampleUrl = t.CustomDetailUrl.Replace("{id}", "0");
+                                                <a class="btn btn-sm btn-outline-secondary"
+                                                   href="@sampleUrl" target="_blank">
+                                                    Thử URL
+                                                </a>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
     }
-
-    <div class="mb-3">
-        <label asp-for="Name" class="form-label">Tên connection</label>
-        <input asp-for="Name" class="form-control" />
-        <span asp-validation-for="Name" class="text-danger"></span>
-    </div>
-
-    <div class="mb-3">
-        <label asp-for="Provider" class="form-label">Provider</label>
-        <select asp-for="Provider" class="form-select">
-            <option value="mssql">mssql</option>
-            <option value="mysql">mysql</option>
-            <option value="pgsql">pgsql</option>
-        </select>
-        <span class="form-text">
-            Hiện tại code mới hỗ trợ mssql (SqlConnection); các loại khác sẽ bổ sung sau.
-        </span>
-    </div>
-
-    <div class="mb-3">
-        <label asp-for="ConnString" class="form-label">Connection string</label>
-        <textarea asp-for="ConnString" class="form-control" rows="3"></textarea>
-        <span asp-validation-for="ConnString" class="text-danger"></span>
-    </div>
-
-    <div class="form-check mb-3">
-        <input asp-for="IsActive" class="form-check-input" />
-        <label asp-for="IsActive" class="form-check-label">Kích hoạt</label>
-    </div>
-
-    <button type="submit" class="btn btn-primary">Lưu</button>
-    <a asp-controller="Connections" asp-action="Index"
-       class="btn btn-secondary ms-2">
-        Quay lại
-    </a>
-</form>
+}
 
 @section Scripts {
-    <partial name="_ValidationScriptsPartial" />
+    <script>
+        (function(){
+          const input = document.getElementById('schemaSearch');
+          const clear = document.getElementById('schemaClear');
+
+          function apply(){
+            const q = (input.value || '').trim().toLowerCase();
+            document.querySelectorAll('.schema-row').forEach(tr => {
+              const hay = tr.getAttribute('data-search') || '';
+              tr.style.display = (!q || hay.includes(q)) ? '' : 'none';
+            });
+          }
+
+          input?.addEventListener('input', apply);
+          clear?.addEventListener('click', () => { input.value=''; apply(); input.focus(); });
+        })();
+    </script>
 }

@@ -78,9 +78,11 @@ else
                             </form>
 
                             <a class="btn btn-sm btn-outline-secondary ms-1"
-                               asp-controller="Schema" asp-action="Index">
+                               asp-controller="Schema" asp-action="Index"
+                               asp-route-connectionId="@c.Id">
                                 Xem schema
                             </a>
+
                         </td>
                     </tr>
                 }

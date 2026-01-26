@@ -14,13 +14,10 @@
         .Where(c => !c.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase))
         .ToList();
 
-    // Bảng đánh giá?
-    var isReviewTable = string.Equals(
-        Model.Table.TableName,
-        "tbl_product_review",
-        StringComparison.OrdinalIgnoreCase);
+    var isReviewTable = string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase);
+    var isOrdersTable = string.Equals(Model.Table.TableName, "tbl_orders", StringComparison.OrdinalIgnoreCase);
 
-    // Đếm số review CHỜ DUYỆT (status = 0) trên TRANG HIỆN TẠI
+    // Đếm review pending trên trang hiện tại
     var pendingCount = 0;
     if (isReviewTable && Model.Rows != null)
     {
@@ -28,22 +25,18 @@
         {
             if (r != null && r.ContainsKey("status"))
             {
-                if (byte.TryParse(r["status"]?.ToString(), out var st) && st == 0)
-                {
-                    pendingCount++;
-                }
+                if (byte.TryParse(r["status"]?.ToString(), out var st) && st == 0) pendingCount++;
             }
         }
     }
 
-    // Lấy filter status hiện tại để sync với checkbox "Chỉ hiện đánh giá chưa duyệt"
     var statusFilterValue = "";
     if (Model.Filters != null && Model.Filters.TryGetValue("status", out var stFilterObj))
-    {
         statusFilterValue = stFilterObj?.ToString() ?? "";
-    }
+
     var onlyPendingChecked = isReviewTable && statusFilterValue == "0";
 }
+
 @{
     var lookupsRaw = ViewBag.Lookups as Dictionary<string, List<(string Value, string Text)>>;
 
@@ -82,7 +75,7 @@
         if (map.TryGetValue(col.ColumnName, out var m) && m.TryGetValue(key, out var text))
             return text;
 
-        return key; // fallback: vẫn hiện id nếu không tìm thấy
+        return key;
     }
 
     IHtmlContent Opt(string value, string text, string current)
@@ -105,14 +98,8 @@
         if (fmt == "img" || fmt == "image" || fmt.StartsWith("img:"))
             return true;
 
-        if (name.Contains("image") ||
-            name.Contains("img") ||
-            name.Contains("thumb") ||
-            name.Contains("avatar") ||
-            name.Contains("photo"))
-        {
+        if (name.Contains("image") || name.Contains("img") || name.Contains("thumb") || name.Contains("avatar") || name.Contains("photo"))
             return true;
-        }
 
         return false;
     }
@@ -146,15 +133,77 @@
         return firstChar + new string('*', Math.Max(3, local.Length - 1)) + domain;
     }
 
+    // ====== ORDERS STATUS helpers ======
+    string OrderStatusText(byte b) => b switch
+    {
+        0 => "Mới tạo",
+        1 => "Đã xác nhận",
+        2 => "Đang giao",
+        3 => "Đã giao",
+        4 => "Đã huỷ",
+        5 => "Chờ lấy hàng",
+        6 => "Đang giao hàng",
+        7 => "Đã nhận hàng",
+        8 => "Hoàn trả",
+        9 => "Huỷ đơn",
+        10 => "Khác",
+        _ => b.ToString()
+    };
+
+    string OrderStatusBadgeClass(byte b) => b switch
+    {
+        0 => "bg-secondary",
+        1 => "bg-info text-dark",
+        2 => "bg-primary",
+        3 => "bg-success",
+        4 => "bg-danger",
+        5 => "bg-secondary",
+        6 => "bg-primary",
+        7 => "bg-success",
+        8 => "bg-warning text-dark",
+        9 => "bg-danger",
+        10 => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    // ====== REVIEW STATUS helpers ======
+    (string Text, string Cls) ReviewStatusBadge(byte b) => b switch
+    {
+        0 => ("Chờ duyệt", "bg-warning text-dark"),
+        1 => ("Đã duyệt", "bg-success"),
+        2 => ("Đã từ chối", "bg-danger"),
+        _ => (b.ToString(), "bg-secondary")
+    };
+
+    // bit parsing (0/1/true/false)
+    bool ParseBit(object? v)
+    {
+        if (v == null || v is DBNull) return false;
+        if (v is bool b) return b;
+
+        var s = (v.ToString() ?? "").Trim().ToLowerInvariant();
+        if (s == "1" || s == "true" || s == "yes") return true;
+        return false;
+    }
+
+    // Render text thường (fallback)
     string RenderCell(CmsTools.Models.CmsColumnMeta col, object? value)
     {
         if (value == null || value is DBNull) return string.Empty;
 
+        // bit có thể về dạng 0/1
+        if (string.Equals((col.DataType ?? "").Trim(), "bit", StringComparison.OrdinalIgnoreCase))
+        {
+            var bb = ParseBit(value);
+            return bb ? "✅" : "—";
+        }
+
+        // bool -> ký hiệu gọn
+        if (value is bool bval) return bval ? "✅" : "—";
+
         var s = value.ToString() ?? string.Empty;
         var fmt = (col.Format ?? string.Empty).Trim();
-
-        if (string.IsNullOrEmpty(fmt))
-            return s;
+        if (string.IsNullOrEmpty(fmt)) return s;
 
         var lower = fmt.ToLowerInvariant();
 
@@ -175,6 +224,30 @@
                     1 => "Đã duyệt",
                     2 => "Đã từ chối",
                     _ => b.ToString()
+                };
+            }
+            return s;
+        }
+
+        if (lower == "orderstatus")
+        {
+            if (byte.TryParse(s, out var b))
+                return OrderStatusText(b);
+            return s;
+        }
+
+        // Payment method
+        if (lower == "paymentmethod" || string.Equals(col.ColumnName, "payment_method", StringComparison.OrdinalIgnoreCase))
+        {
+            if (byte.TryParse(s, out var pm))
+            {
+                return pm switch
+                {
+                    1 => "COD",
+                    2 => "Pay2S",
+                    3 => "ZaloPay",
+                    4 => "MoMo",
+                    _ => pm.ToString()
                 };
             }
             return s;
@@ -209,23 +282,31 @@
             return $"min-width:{c.Width.Value}px;max-width:{c.Width.Value + 60}px;";
         return string.Empty;
     }
+
+    IHtmlContent Badge(string text, string cls)
+    {
+        var span = new TagBuilder("span");
+        span.AddCssClass("badge");
+        span.AddCssClass(cls);
+        span.InnerHtml.Append(text);
+        return span;
+    }
 }
 
-<!-- ✅ WRAP TO ENABLE AJAX REFRESH LIST -->
 <div id="cmsListRoot" data-cms-list-root="1">
 
     <div class="cmstools-page-header">
         <div>
             <h2 class="cmstools-page-title">@title</h2>
             <div class="cmstools-page-subtitle">
-                <span>Table: <strong>@Model.Table.FullName</strong></span>
-                <span class="ms-3">Total rows: <strong>@Model.Total</strong></span>
+                <span>Bảng: <strong>@Model.Table.FullName</strong></span>
+                <span class="ms-3">Tổng dòng: <strong>@Model.Total</strong></span>
 
                 @if (isReviewTable)
                 {
                     <span class="ms-3">
                         <span class="badge bg-warning text-dark">
-                            Chờ duyệt (trên trang này): @pendingCount
+                            Chờ duyệt (trang này): @pendingCount
                         </span>
                     </span>
                 }
@@ -233,7 +314,8 @@
         </div>
 
         <div class="cmstools-page-actions">
-            @if (Model.Permission?.CanCreate == true)
+            @if (Model.Permission?.CanCreate == true && !isReviewTable)
+
             {
                 <button type="button"
                         class="btn btn-success btn-sm me-2"
@@ -268,6 +350,7 @@
                         {
                             var name = col.ColumnName;
                             var label = col.DisplayName ?? col.ColumnName;
+
                             Model.Filters.TryGetValue(name, out var currentValueObj);
                             var currentValue = currentValueObj?.ToString() ?? string.Empty;
 
@@ -348,10 +431,24 @@
                                             @Opt("1", "Đã duyệt", currentValue)
                                             @Opt("2", "Đã từ chối", currentValue)
                                         }
+                                        else if (isOrdersTable)
+                                        {
+                                            @Opt("0", "Mới tạo", currentValue)
+                                            @Opt("1", "Đã xác nhận", currentValue)
+                                            @Opt("2", "Đang giao", currentValue)
+                                            @Opt("3", "Đã giao", currentValue)
+                                            @Opt("4", "Đã huỷ", currentValue)
+                                            @Opt("5", "Chờ lấy hàng", currentValue)
+                                            @Opt("6", "Đang giao hàng", currentValue)
+                                            @Opt("7", "Đã nhận hàng", currentValue)
+                                            @Opt("8", "Hoàn trả", currentValue)
+                                            @Opt("9", "Huỷ đơn", currentValue)
+                                            @Opt("10", "Khác", currentValue)
+                                        }
                                         else
                                         {
-                                            @Opt("1", "Active", currentValue)
-                                            @Opt("0", "Inactive", currentValue)
+                                            @Opt("1", "Hoạt động", currentValue)
+                                            @Opt("0", "Tạm tắt", currentValue)
                                         }
                                     </select>
                                 }
@@ -452,6 +549,7 @@
                                 {
                                     var name = col.ColumnName;
                                     var label = col.DisplayName ?? col.ColumnName;
+
                                     Model.Filters.TryGetValue(name, out var currentValueObj);
                                     var currentValue = currentValueObj?.ToString() ?? string.Empty;
 
@@ -532,10 +630,24 @@
                                                     @Opt("1", "Đã duyệt", currentValue)
                                                     @Opt("2", "Đã từ chối", currentValue)
                                                 }
+                                                else if (isOrdersTable)
+                                                {
+                                                    @Opt("0", "Mới tạo", currentValue)
+                                                    @Opt("1", "Đã xác nhận", currentValue)
+                                                    @Opt("2", "Đang giao", currentValue)
+                                                    @Opt("3", "Đã giao", currentValue)
+                                                    @Opt("4", "Đã huỷ", currentValue)
+                                                    @Opt("5", "Chờ lấy hàng", currentValue)
+                                                    @Opt("6", "Đang giao hàng", currentValue)
+                                                    @Opt("7", "Đã nhận hàng", currentValue)
+                                                    @Opt("8", "Hoàn trả", currentValue)
+                                                    @Opt("9", "Huỷ đơn", currentValue)
+                                                    @Opt("10", "Khác", currentValue)
+                                                }
                                                 else
                                                 {
-                                                    @Opt("1", "Active", currentValue)
-                                                    @Opt("0", "Inactive", currentValue)
+                                                    @Opt("1", "Hoạt động", currentValue)
+                                                    @Opt("0", "Tạm tắt", currentValue)
                                                 }
                                             </select>
                                         }
@@ -640,61 +752,19 @@
                             if (row != null && row.ContainsKey("status"))
                                 byte.TryParse(row["status"]?.ToString(), out reviewStatus);
 
+                            // FIX: bit 0/1 parse
                             bool isHidden = false;
                             if (row != null && row.ContainsKey("is_hidden"))
-                                bool.TryParse(row["is_hidden"]?.ToString(), out isHidden);
+                                isHidden = ParseBit(row["is_hidden"]);
 
                             <tr>
                                 <td class="cmstools-td cmstools-td-actions">
                                     @if (idValue != null)
                                     {
-                                        <div class="cmstools-actions-group d-flex flex-wrap">
-                                            @if (Model.Permission?.CanUpdate == true)
-                                            {
-                                                <button type="button"
-                                                        class="btn btn-primary btn-sm cmstools-action-btn"
-                                                        data-cms-modal="form"
-                                                        data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                        data-url="@Url.Action("EditForm", "Data", new { tableId = Model.Table.Id, id = idValue })">
-                                                    Sửa
-                                                </button>
-                                            }
-                                            else if (Model.Permission?.CanView == true && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
-                                            {
-                                                <a class="btn btn-outline-secondary btn-sm cmstools-action-btn"
-                                                   href="/Data/Details?tableId=@Model.Table.Id&id=@idValue"
-                                                   target="_blank" rel="noopener">
-                                                    Mở trang
-                                                </a>
-                                            }
-
-                                            @if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
-                                            {
-                                                var idStr = idValue.ToString();
-                                                var url = Model.Table.CustomDetailUrl
-                                                .Replace("{id}", idStr)
-                                                .Replace("{pk}", idStr);
-
-                                                <a class="btn btn-outline-primary btn-sm cmstools-action-btn"
-                                                   href="@url"
-                                                   target="_blank" rel="noopener">
-                                                    Mở trang
-                                                </a>
-                                            }
-
-                                            <button type="button"
-                                                    class="btn btn-outline-secondary btn-sm cmstools-action-btn"
-                                                    data-cms-modal="row"
-                                                    data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
-                                                    data-url="@Url.Action("DetailsModal", "Data", new { tableId = Model.Table.Id, id = idValue })">
-                                                <span class="cmstools-action-text">Xem nhanh</span>
-                                            </button>
-                                        </div>
-
-                                        @if (string.Equals(Model.Table.TableName, "tbl_product_review", StringComparison.OrdinalIgnoreCase)
-                                                                    && Model.Permission?.CanUpdate == true)
+                                        @* ===== REVIEW: chỉ 1 nút Duyệt/Xem + phản hồi ===== *@
+                                        if (isReviewTable && Model.Permission?.CanUpdate == true)
                                         {
-                                            <div class="cmstools-actions-group d-flex flex-wrap mt-1">
+                                            <div class="cmstools-actions-group d-flex flex-wrap">
                                                 @{
                                                     var btnText = reviewStatus == 0 ? "Duyệt / Phản hồi" : "Xem / Phản hồi";
                                                     var btnClass = reviewStatus == 0 ? "btn-outline-primary" : "btn-outline-info";
@@ -708,6 +778,7 @@
                                                     @btnText
                                                 </button>
 
+                                                @* Ẩn/Hiện trên web chỉ khi đã duyệt *@
                                                 @if (reviewStatus == 1)
                                                 {
                                                     var hideText = isHidden ? "Hiện trên web" : "Ẩn khỏi web";
@@ -728,9 +799,55 @@
                                                 }
                                             </div>
                                         }
+                                        @* ===== NON-REVIEW: giữ hành vi cũ ===== *@
                                         else
                                         {
-                                            if (Model.Permission != null
+                                            <div class="cmstools-actions-group d-flex flex-wrap">
+                                                @if (Model.Permission?.CanUpdate == true)
+                                                {
+                                                    <button type="button"
+                                                            class="btn btn-primary btn-sm cmstools-action-btn"
+                                                            data-cms-modal="form"
+                                                            data-title="Sửa - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                                            data-url="@Url.Action("EditForm", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                                        Sửa
+                                                    </button>
+                                                }
+                                                else if (Model.Permission?.CanView == true && string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                                {
+                                                    <a class="btn btn-outline-secondary btn-sm cmstools-action-btn"
+                                                       href="/Data/Details?tableId=@Model.Table.Id&id=@idValue"
+                                                       target="_blank" rel="noopener">
+                                                        Mở trang
+                                                    </a>
+                                                }
+
+                                                @if (!string.IsNullOrWhiteSpace(Model.Table.CustomDetailUrl))
+                                                {
+                                                    var idStr = idValue.ToString();
+                                                    var url = Model.Table.CustomDetailUrl
+                                                    .Replace("{id}", idStr)
+                                                    .Replace("{pk}", idStr);
+
+                                                    <a class="btn btn-outline-primary btn-sm cmstools-action-btn"
+                                                       href="@url"
+                                                       target="_blank" rel="noopener">
+                                                        Mở trang
+                                                    </a>
+                                                }
+
+                                                <button type="button"
+                                                        class="btn btn-outline-secondary btn-sm cmstools-action-btn"
+                                                        data-cms-modal="row"
+                                                        data-title="Xem nhanh - @(Model.Table.DisplayName ?? Model.Table.TableName) (#@idValue)"
+                                                        data-url="@Url.Action("DetailsModal", "Data", new { tableId = Model.Table.Id, id = idValue })">
+                                                    <span class="cmstools-action-text">Xem nhanh</span>
+                                                </button>
+                                            </div>
+
+                                            @* Toggle Active/Inactive cho bảng thường (không orders) *@
+                                            if (!isOrdersTable
+                                            && Model.Permission != null
                                             && (Model.Permission.CanUpdate || Model.Permission.CanDelete)
                                             && Model.Columns.Any(x => x.ColumnName.Equals("status", StringComparison.OrdinalIgnoreCase)))
                                             {
@@ -768,6 +885,7 @@
                                             }
                                         }
                                     }
+
                                 </td>
 
                                 @if (idCol != null)
@@ -805,47 +923,22 @@
                                     }
                                     else if (string.Equals(c.ColumnName, "status", StringComparison.OrdinalIgnoreCase) && cell is not null)
                                     {
-                                        byte statusByte;
-                                        if (byte.TryParse(cell.ToString(), out statusByte))
+                                        // ✅ FIX: status không còn bị trống (orders/review/bảng thường)
+                                        if (byte.TryParse(cell.ToString(), out var statusByte))
                                         {
                                             <td class="cmstools-td">
-                                                @if (Model.Table.TableName.Equals("tbl_product_review", StringComparison.OrdinalIgnoreCase)
-                                                                            || string.Equals(c.Format, "reviewStatus", StringComparison.OrdinalIgnoreCase))
+                                                @if (isOrdersTable)
                                                 {
-                                                    if (statusByte == 0)
-                                                    {
-                                                        <span class="badge bg-warning text-dark">Chờ duyệt</span>
-                                                    }
-                                                    else if (statusByte == 1)
-                                                    {
-                                                        if (isHidden)
-                                                        {
-                                                            <span class="badge bg-secondary text-light">Đã duyệt (đang ẩn)</span>
-                                                        }
-                                                        else
-                                                        {
-                                                            <span class="badge bg-success">Đã duyệt</span>
-                                                        }
-                                                    }
-                                                    else if (statusByte == 2)
-                                                    {
-                                                        <span class="badge bg-danger">Đã từ chối</span>
-                                                    }
-                                                    else
-                                                    {
-                                                        @statusByte.ToString()
-                                                    }
+                                                    @Badge(OrderStatusText(statusByte), OrderStatusBadgeClass(statusByte))
+                                                }
+                                                else if (isReviewTable)
+                                                {
+                                                    var rs = ReviewStatusBadge(statusByte);
+                                                    @Badge(rs.Text, rs.Cls)
                                                 }
                                                 else
                                                 {
-                                                    if (statusByte == 1)
-                                                    {
-                                                        <span class="badge bg-success">Active</span>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="badge bg-secondary">Inactive</span>
-                                                    }
+                                                    @RenderCell(c, cell)
                                                 }
                                             </td>
                                         }
@@ -853,6 +946,10 @@
                                         {
                                             <td class="cmstools-td">@RenderCell(c, cell)</td>
                                         }
+                                    }
+                                    else if (cell is bool)
+                                    {
+                                        <td class="cmstools-td">@RenderCell(c, cell)</td>
                                     }
                                     else if (IsFkColumn(c))
                                     {
@@ -895,10 +992,10 @@
     }
 
 </div>
-<!-- ✅ END WRAP -->
+
 @section Scripts {
     <script>
-        // ✅ Chỉ giữ sync checkbox -> dropdown status (modal đã xử lý ở site.js)
+        // review checkbox -> sync dropdown status + auto submit
         document.addEventListener('change', function (e) {
             const cb = e.target.closest('#filterOnlyPending');
             if (!cb) return;
@@ -910,6 +1007,9 @@
             if (!statusSelect) return;
 
             statusSelect.value = cb.checked ? '0' : '';
+
+            // ✅ tick là lọc luôn
+            form.submit(); // nếu không muốn auto-submit thì xóa dòng này
         });
     </script>
 }

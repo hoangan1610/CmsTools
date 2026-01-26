@@ -3,6 +3,9 @@ using System.Collections.Generic;
 
 namespace CmsTools.Models
 {
+    // =========================
+    // Revenue recognized (delivered)
+    // =========================
     public sealed class RevenueOverview
     {
         public int TotalOrders { get; set; }
@@ -36,7 +39,79 @@ namespace CmsTools.Models
         public decimal TotalAmount { get; set; }
     }
 
+    // =========================
+    // Cash-in (cashflow)
+    // - Online: paid_at (payment success)
+    // - COD: delivered/received_confirmed
+    // =========================
+    public sealed class CashflowOverview
+    {
+        public decimal TotalCashIn { get; set; }
+        public int TotalOrders { get; set; }
 
+        public decimal OnlineCashIn { get; set; }
+        public int OnlineOrders { get; set; }
+
+        public decimal CodCashIn { get; set; }
+        public int CodOrders { get; set; }
+    }
+
+    public sealed class CashflowByPeriodRow
+    {
+        public DateTime PeriodDate { get; set; }
+
+        public decimal OnlineAmount { get; set; }
+        public int OnlineOrders { get; set; }
+
+        public decimal CodAmount { get; set; }
+        public int CodOrders { get; set; }
+
+        public decimal TotalAmount { get; set; }
+        public int TotalOrders { get; set; }
+    }
+
+    public sealed class CashflowByProviderRow
+    {
+        public string? ProviderLabel { get; set; }
+        public string? MethodLabel { get; set; }
+        public decimal TotalAmount { get; set; }
+        public int SuccessfulOrders { get; set; }
+    }
+
+    // =========================
+    // Pipeline snapshot (open orders)
+    // =========================
+    public sealed class PipelineSnapshot
+    {
+        public DateTime AsOfExcl { get; set; }
+
+        public int OpenOrders { get; set; }
+        public decimal OpenAmount { get; set; }
+
+        public int CodOutstandingOrders { get; set; }
+        public decimal CodOutstandingAmount { get; set; }
+
+        public int OnlinePendingOrders { get; set; }
+        public decimal OnlinePendingAmount { get; set; }
+
+        public int OnlinePrepaidOrders { get; set; }
+        public decimal OnlinePrepaidAmount { get; set; }
+    }
+
+    public sealed class PipelineByStatusRow
+    {
+        public byte Status { get; set; }
+        public int OrderCount { get; set; }
+        public decimal Amount { get; set; }
+
+        public decimal CodAmount { get; set; }
+        public decimal OnlinePendingAmount { get; set; }
+        public decimal OnlinePrepaidAmount { get; set; }
+    }
+
+    // =========================
+    // ViewModel (Revenue page)
+    // =========================
     public class RevenueReportViewModel
     {
         public DateTime FromDate { get; set; }
@@ -52,8 +127,20 @@ namespace CmsTools.Models
         public List<RevenueByProviderRow> Providers { get; set; } = new();
 
         public RevenueAiInsightResult? Ai { get; set; }
+
+        // ===== Cash-in (dòng tiền) =====
+        public CashflowOverview CashflowOverview { get; set; } = new CashflowOverview();
+        public List<CashflowByPeriodRow> CashflowRows { get; set; } = new List<CashflowByPeriodRow>();
+        public List<CashflowByProviderRow> CashflowProviders { get; set; } = new List<CashflowByProviderRow>();
+
+        // ===== Pipeline snapshot (tiền đang nằm ở đơn chưa hoàn tất) =====
+        public PipelineSnapshot Pipeline { get; set; } = new PipelineSnapshot();
+        public List<PipelineByStatusRow> PipelineByStatus { get; set; } = new List<PipelineByStatusRow>();
     }
 
+    // =========================
+    // AI Insight
+    // =========================
     public sealed class RevenueAiInsightResult
     {
         public string Summary { get; set; } = "";
@@ -64,7 +151,9 @@ namespace CmsTools.Models
         public string? Raw { get; set; }
     }
 
-
+    // =========================
+    // Reorder Suggest
+    // =========================
     public sealed class ReorderSuggestRow
     {
         public long VariantId { get; set; }
